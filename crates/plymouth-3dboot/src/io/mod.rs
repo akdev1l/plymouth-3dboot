@@ -5,6 +5,7 @@
 //! model refers to through a [`ResourceResolver`]; [`FsResolver`] is the only
 //! place the core touches the filesystem, and only when a caller uses it.
 
+pub mod obj;
 pub mod png;
 pub mod resolve;
 
