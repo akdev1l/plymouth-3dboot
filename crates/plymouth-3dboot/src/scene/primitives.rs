@@ -61,14 +61,21 @@ pub fn uv_sphere(radius: f32, segments: u32, rings: u32) -> Mesh {
     for r in 0..=rings {
         let v = r as f32 / rings as f32;
         let theta = v * std::f32::consts::PI; // 0 at +Y pole
+        // Exact poles: sin(π) is not exactly 0 in f32.
+        let (sin_t, cos_t) = match r {
+            0 => (0.0, 1.0),
+            r if r == rings => (0.0, -1.0),
+            _ => (theta.sin(), theta.cos()),
+        };
         for s in 0..=segments {
             let u = s as f32 / segments as f32;
-            let phi = u * std::f32::consts::TAU;
-            let n = Vec3::new(
-                theta.sin() * phi.sin(),
-                theta.cos(),
-                theta.sin() * phi.cos(),
-            );
+            // The seam column repeats column 0's position exactly.
+            let phi = if s == segments {
+                0.0
+            } else {
+                u * std::f32::consts::TAU
+            };
+            let n = Vec3::new(sin_t * phi.sin(), cos_t, sin_t * phi.cos());
             positions.push(n * radius);
             normals.push(n);
             uvs.push(Vec2::new(u, v));
@@ -130,6 +137,20 @@ mod tests {
             for i in [a, b, c] {
                 assert!(n[i as usize].abs_diff_eq(face, 1e-6));
             }
+        }
+    }
+
+    #[test]
+    fn sphere_poles_and_seam_are_bit_identical() {
+        let m = uv_sphere(1.0, 8, 4);
+        let p = m.positions();
+        let row = 9;
+        for s in 0..9 {
+            assert_eq!(p[s], Vec3::Y, "north pole");
+            assert_eq!(p[4 * row + s], Vec3::NEG_Y, "south pole");
+        }
+        for r in 0..5 {
+            assert_eq!(p[r * row], p[r * row + 8], "seam at ring {r}");
         }
     }
 
