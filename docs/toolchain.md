@@ -34,7 +34,9 @@ catches this.
 ## WebAssembly (`wasm32-unknown-emscripten`)
 
 - Configured in [`.cargo/config.toml`](../.cargo/config.toml): the runner is
-  `node`, and links use `-sALLOW_MEMORY_GROWTH=1`.
+  `node`, and links use `-sALLOW_MEMORY_GROWTH=1` and `-sSTACK_SIZE=1MB`.
+  Emscripten's default 64 KiB stack overflows in debug builds: PNG encoding
+  alone needs more.
 - Panics use rustc's default strategy for this target (native wasm
   exceptions). Unwinding, `#[should_panic]`, `catch_unwind`, filesystem access
   under `NODERAWFS` and heap growth past 256 MiB were all verified under node.

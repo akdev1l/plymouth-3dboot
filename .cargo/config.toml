@@ -6,6 +6,9 @@ runner = "node"
 rustflags = [
     # Scenes and framebuffers can exceed the default 16 MiB initial heap.
     "-Clink-arg=-sALLOW_MEMORY_GROWTH=1",
+    # Emscripten's default 64 KiB stack is too small for unoptimized builds
+    # (e.g. miniz_oxide's deflate buffers live on the stack before boxing).
+    "-Clink-arg=-sSTACK_SIZE=1MB",
     # rustc 1.98 still passes -sWASM_BIGINT, which emsdk 6 reports as
     # deprecated on every link. Silence it until rustc drops the flag
     # (tracked in docs/toolchain.md).
