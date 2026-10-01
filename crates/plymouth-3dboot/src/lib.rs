@@ -14,6 +14,7 @@ pub mod io;
 pub mod math;
 pub mod pipeline;
 pub mod raster;
+pub mod render;
 pub mod scene;
 pub mod shading;
 pub mod target;
