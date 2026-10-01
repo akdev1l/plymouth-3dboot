@@ -171,7 +171,7 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
 
 **0.7 `justfile` quality gate**
 - `just check` runs `fmt --check`, clippy (both targets), native `nextest`, doctests, `doc -D warnings`, the wasm build, wasm tests, and `cargo deny`. From Phase 11 it also runs the C-ABI tests (`just test-c`), and from Phase 12 the Plymouth harness (`just test-plymouth`).
-- Also add `just fmt|test|test-wasm|golden-update|cov|viewer|viewer-web|browser-smoke`.
+- Also add `just fmt|test|test-wasm|build-wasm|smoke-sdl|golden-update|cov`. The `viewer`, `viewer-web` and `browser-smoke` recipes are added in Phase 6, `deny` in 0.8, `test-c` in Phase 11 and `test-plymouth` in Phase 12, each joining `check` as it lands.
 - *Done when:* `scripts/dev.sh just check` is green.
 - *Commit:* `build: add justfile quality gate for native and wasm`
 
