@@ -12,8 +12,9 @@ pub const SUBPIXEL_SCALE: i64 = 1 << SUBPIXEL_BITS;
 /// Largest accepted magnitude of a window coordinate, in pixels.
 ///
 /// This is a guard band four times the largest framebuffer
-/// ([`crate::target::MAX_DIMENSION`]). The clipper keeps vertices inside it,
-/// and it bounds edge-function terms below 2^51, far from `i64` overflow.
+/// ([`crate::target::MAX_DIMENSION`]). The clipper keeps vertices inside it.
+/// It bounds each edge-function product below 2^49 and every edge-function
+/// value below 2^51, far from `i64` overflow.
 pub const MAX_COORD: f32 = 65_536.0;
 
 /// A point on the subpixel grid: pixel coordinates times [`SUBPIXEL_SCALE`].

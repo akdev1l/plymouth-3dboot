@@ -209,25 +209,24 @@ impl TriangleSetup {
     /// Calls `f` once for every pixel inside `scissor` whose centre the
     /// triangle covers under the top-left fill rule, row by row.
     pub fn for_each_pixel(&self, scissor: Rect, mut f: impl FnMut(Fragment)) {
-        let clamp = |v: i64, lo: u32, hi: u32| -> Option<u32> {
-            // `hi` is exclusive; an empty range yields None below.
-            u32::try_from(v.clamp(i64::from(lo), i64::from(hi))).ok()
-        };
-        let (Some(x0), Some(y0)) = (
-            clamp(self.min.0, scissor.x0, scissor.x1),
-            clamp(self.min.1, scissor.y0, scissor.y1),
-        ) else {
-            return;
-        };
-        let (Some(x1), Some(y1)) = (
-            clamp(self.max.0 + 1, scissor.x0, scissor.x1),
-            clamp(self.max.1 + 1, scissor.y0, scissor.y1),
-        ) else {
-            return;
-        };
+        // Intersect the candidate pixel range with the scissor in i64; an
+        // empty or inverted scissor yields an empty range.
+        let x0 = self.min.0.max(i64::from(scissor.x0));
+        let y0 = self.min.1.max(i64::from(scissor.y0));
+        let x1 = (self.max.0 + 1).min(i64::from(scissor.x1));
+        let y1 = (self.max.1 + 1).min(i64::from(scissor.y1));
         if x0 >= x1 || y0 >= y1 {
             return;
         }
+        // Within the scissor, hence non-negative and within u32.
+        let (Ok(x0), Ok(y0), Ok(x1), Ok(y1)) = (
+            u32::try_from(x0),
+            u32::try_from(y0),
+            u32::try_from(x1),
+            u32::try_from(y1),
+        ) else {
+            return;
+        };
         let start = FixedPoint::pixel_center(i64::from(x0), i64::from(y0));
         let mut row = self.edges.map(|e| e.eval(start));
         let step_x = self.edges.map(|e| e.step_x());
@@ -395,6 +394,44 @@ mod tests {
     }
 
     #[test]
+    fn empty_or_inverted_scissor_covers_nothing() {
+        let tri = [v(0.0, 0.0), v(30.0, 0.0), v(0.0, 30.0)];
+        assert!(
+            pixels(
+                tri,
+                Rect {
+                    x0: 10,
+                    y0: 0,
+                    x1: 5,
+                    y1: 10
+                }
+            )
+            .is_empty()
+        );
+        assert!(
+            pixels(
+                tri,
+                Rect {
+                    x0: 0,
+                    y0: 9,
+                    x1: 10,
+                    y1: 2
+                }
+            )
+            .is_empty()
+        );
+        // Disjoint rectangles intersect to an inverted, empty rectangle.
+        let disjoint = Rect::from_size(4, 4).intersect(&Rect {
+            x0: 8,
+            y0: 8,
+            x1: 12,
+            y1: 12,
+        });
+        assert!(disjoint.is_empty());
+        assert!(pixels(tri, disjoint).is_empty());
+    }
+
+    #[test]
     fn scissor_clips_coverage() {
         let tri = [v(-20.0, -20.0), v(60.0, 0.0), v(0.0, 60.0)];
         let all = pixels(tri, Rect::from_size(64, 64));
@@ -494,6 +531,17 @@ mod tests {
         (0..q.len()).all(|i| EdgeFunction::new(q[i], q[(i + 1) % q.len()]).eval(p) > 0)
     }
 
+    /// Pixel centres inside or on the boundary of a convex polygon
+    /// (positive orientation): nothing outside may ever be covered.
+    fn inside_or_on(poly: &[Vec2], x: u32, y: u32) -> bool {
+        let p = FixedPoint::pixel_center(i64::from(x), i64::from(y));
+        let q: Vec<_> = poly
+            .iter()
+            .map(|&v| FixedPoint::from_window(v).unwrap())
+            .collect();
+        (0..q.len()).all(|i| EdgeFunction::new(q[i], q[(i + 1) % q.len()]).eval(p) >= 0)
+    }
+
     fn coverage_counts(tris: &[[Vec2; 3]]) -> BTreeMap<(u32, u32), u32> {
         let mut counts = BTreeMap::new();
         for &tri in tris {
@@ -513,8 +561,9 @@ mod tests {
     }
 
     /// `n` points at increasing angles on an ellipse, snapped to the quarter
-    /// grid. Points on an ellipse are in convex position, and consecutive
-    /// angle gaps below π keep the centre inside their hull.
+    /// grid, plus the ellipse centre. Points on an ellipse are in convex
+    /// position. The centre is not always inside their hull (a gap can exceed
+    /// π); tests that need that filter on orientation.
     fn ellipse_polygon(n: usize) -> impl Strategy<Value = (Vec2, Vec<Vec2>)> {
         (
             8.0f32..24.0,
@@ -569,6 +618,9 @@ mod tests {
                     if strictly_inside(&positive, x, y) {
                         prop_assert!(split1.contains_key(&(x, y)), "gap at ({x}, {y})");
                     }
+                    if split1.contains_key(&(x, y)) {
+                        prop_assert!(inside_or_on(&positive, x, y), "covered outside at ({x}, {y})");
+                    }
                 }
             }
         }
@@ -589,6 +641,9 @@ mod tests {
                 for x in 0..SCREEN.x1 {
                     if strictly_inside(&positive, x, y) {
                         prop_assert!(counts.contains_key(&(x, y)), "gap at ({x}, {y})");
+                    }
+                    if counts.contains_key(&(x, y)) {
+                        prop_assert!(inside_or_on(&positive, x, y), "covered outside at ({x}, {y})");
                     }
                 }
             }
