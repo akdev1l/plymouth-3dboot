@@ -213,8 +213,8 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
 - *Tests:* a 2×2 pattern round-trips.
 - *Commit:* `feat(io): encode framebuffer to PNG`
 
-**1.5 Golden-image harness (`tests/common/golden.rs`)**
-- Tolerance, diff images, `UPDATE_GOLDEN`.
+**1.5 Golden-image harness (`crates/plymouth-3dboot-testutil`, a dev-only crate reused by later test suites)**
+- `golden!().assert(name, &image, Tolerance)`: tolerance, diff images, and `UPDATE_GOLDEN` (read once into an explicit `Mode`).
 - It must work under node through `NODERAWFS`.
 - *Tests:* identical images pass; a change within tolerance passes; a change beyond tolerance fails; a missing golden fails. All of this runs on both targets.
 - *Commit:* `test: add golden-image comparison harness`

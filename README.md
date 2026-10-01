@@ -11,6 +11,7 @@ A CPU rasterizer for animated 3D models, written in Rust, for use in a
 - **SDL3 presenter** (`crates/plymouth-3dboot-sdl`): shows frames in a window,
   natively or in the browser through Emscripten.
 - **Viewer** (`apps/viewer`): an interactive model viewer for both targets.
+- **Test support** (`crates/plymouth-3dboot-testutil`): golden-image comparison, for development only.
 - **C API and Plymouth plugin**: planned (Phases 11–12 of the plan).
 
 Targets: `x86_64-unknown-linux-gnu` and `wasm32-unknown-emscripten`.

@@ -16,6 +16,7 @@ png.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+plymouth-3dboot-testutil.workspace = true
 proptest.workspace = true
 
 [lints]

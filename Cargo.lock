@@ -165,6 +165,7 @@ dependencies = [
  "bytemuck",
  "glam",
  "libm",
+ "plymouth-3dboot-testutil",
  "png",
  "proptest",
  "thiserror",
@@ -177,6 +178,13 @@ dependencies = [
  "plymouth-3dboot",
  "sdl3",
  "sdl3-sys",
+]
+
+[[package]]
+name = "plymouth-3dboot-testutil"
+version = "0.1.0"
+dependencies = [
+ "plymouth-3dboot",
 ]
 
 [[package]]

@@ -4,6 +4,7 @@ resolver = "3"
 members = [
     "crates/plymouth-3dboot",
     "crates/plymouth-3dboot-sdl",
+    "crates/plymouth-3dboot-testutil",
     "apps/viewer",
 ]
 
@@ -17,6 +18,7 @@ publish = false
 [workspace.dependencies]
 plymouth-3dboot = { path = "crates/plymouth-3dboot" }
 plymouth-3dboot-sdl = { path = "crates/plymouth-3dboot-sdl" }
+plymouth-3dboot-testutil = { path = "crates/plymouth-3dboot-testutil" }
 # scalar-math + libm: identical results on native and wasm (no SIMD paths,
 # no platform libm), see docs/conventions.md.
 glam = { version = "0.33.12", default-features = false, features = ["std", "scalar-math", "libm"] }
