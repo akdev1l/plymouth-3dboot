@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>plymouth-3dboot viewer</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; background: #000; color: #ccc; font: 14px system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+    canvas { max-width: 100vw; outline: none; }
+    #status { min-height: 1.5em; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="640" height="480" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="status">Loading…</div>
+  <script>
+    var status = document.getElementById('status');
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      print: function (text) { console.log(text); },
+      printErr: function (text) { console.error(text); },
+      onRuntimeInitialized: function () {
+        status.textContent = 'Drag to orbit, scroll to zoom, Space to pause, R to reset.';
+        document.body.dataset.ready = 'true';
+      },
+      onAbort: function (what) { status.textContent = 'Error: ' + what; },
+    };
+  </script>
+  <script async src="plymouth-3dboot-viewer.js"></script>
+</body>
+</html>

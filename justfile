@@ -5,6 +5,8 @@
 set positional-arguments
 
 wasm_target := "wasm32-unknown-emscripten"
+# Size budget for the release web viewer's .wasm (docs/toolchain.md).
+web_wasm_budget := "4194304"
 # Test binaries need host filesystem access under node (see docs/toolchain.md).
 wasm_test_flags := "--target " + wasm_target + " --target-dir target/wasm-test --config 'target." + wasm_target + ".rustflags=[\"-Clink-arg=-sNODERAWFS=1\"]'"
 
@@ -13,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl viewer-web deny
 
 # Format all code.
 fmt:
@@ -53,6 +55,16 @@ smoke-sdl:
 # for a window, run it on the host with SDL3 installed).
 viewer *args:
     cargo run --locked -p plymouth-3dboot-viewer -- "$@"
+
+# Build the web viewer into target/web (serve that directory over HTTP).
+viewer-web:
+    cargo build --locked --release -p plymouth-3dboot-viewer --target {{wasm_target}}
+    rm -rf target/web && mkdir -p target/web
+    cp apps/viewer/web/index.html target/web/
+    cp target/{{wasm_target}}/release/plymouth-3dboot-viewer.js target/{{wasm_target}}/release/plymouth_3dboot_viewer.wasm target/web/
+    @ls -l target/web
+    @size=$(stat -c %s target/web/plymouth_3dboot_viewer.wasm); \
+        if [ "$size" -gt {{web_wasm_budget}} ]; then echo "wasm is $size bytes, over the {{web_wasm_budget}} budget"; exit 1; fi
 
 # Licence, advisory, ban and source policy (deny.toml).
 deny:

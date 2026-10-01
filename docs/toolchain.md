@@ -67,3 +67,14 @@ scripts/dev.sh env SDL_VIDEODRIVER=dummy cargo run -p plymouth-3dboot-sdl --exam
 # Web (build only; running it needs a browser, see Phase 6)
 scripts/dev.sh cargo build -p plymouth-3dboot-sdl --example sdl_smoke --target wasm32-unknown-emscripten
 ```
+
+## Web viewer
+
+`just viewer-web` builds the viewer for the browser into `target/web/`:
+`index.html` (from `apps/viewer/web/`), `plymouth-3dboot-viewer.js` and
+`plymouth_3dboot_viewer.wasm`. The JS loader expects the `.wasm` under its
+crate name, with underscores. Serve the directory over HTTP, for example
+`python3 -m http.server -d target/web`; `file://` URLs cannot load wasm.
+
+Sizes at the time of writing (release, embedded N64 model): `.wasm`
+1.2 MB, `.js` 180 KB. `just check` fails if the `.wasm` exceeds 4 MiB.
