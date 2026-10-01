@@ -8,6 +8,8 @@
 #[allow(dead_code)]
 mod geometry;
 #[allow(dead_code)]
+mod material;
+#[allow(dead_code)]
 mod xml;
 
 /// Loading a COLLADA document failed.
