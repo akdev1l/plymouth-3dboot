@@ -4,13 +4,63 @@
 //! A documented subset of COLLADA 1.4/1.5 is supported; unsupported
 //! elements are skipped with a warning rather than failing the load.
 
-// Used by the material and scene loaders added next.
-#[allow(dead_code)]
 mod geometry;
-#[allow(dead_code)]
 mod material;
-#[allow(dead_code)]
+mod scene;
 mod xml;
+
+use crate::io::ResourceResolver;
+use crate::scene::Scene;
+
+/// Options for [`load_collada`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColladaOptions {
+    /// Rotate the scene so the document's `<up_axis>` becomes +Y.
+    pub convert_up_axis: bool,
+    /// Scale the scene by `<unit meter>` so that one unit is one metre.
+    pub convert_units: bool,
+}
+
+impl Default for ColladaOptions {
+    fn default() -> Self {
+        Self {
+            convert_up_axis: true,
+            convert_units: true,
+        }
+    }
+}
+
+/// A loaded COLLADA document.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColladaModel {
+    /// The scene. Its single root node (named `collada`) holds the up-axis
+    /// and unit conversion; the document's nodes are below it.
+    pub scene: Scene,
+    /// Problems that did not prevent loading (unsupported features).
+    pub warnings: Vec<String>,
+}
+
+/// Loads a COLLADA document.
+///
+/// Supported: `<mesh>` geometry (`triangles`, `polylist`, `polygons`),
+/// common-profile materials (colours; textures are ignored), node
+/// hierarchies with `translate`/`rotate`/`scale`/`matrix`/`lookat`
+/// transforms (kept as transform stacks), `instance_node`, and material
+/// binding. Cameras, lights, controllers (skinning) and textures produce
+/// warnings. `resolver` is reserved for external resources (textures).
+///
+/// # Errors
+///
+/// Returns [`ColladaError`] for malformed XML or structurally invalid data.
+pub fn load_collada(
+    text: &str,
+    _resolver: &impl ResourceResolver,
+    options: &ColladaOptions,
+) -> Result<ColladaModel, ColladaError> {
+    let doc = xml::Document::parse(text)?;
+    let (scene, warnings) = scene::build_scene(&doc, options)?;
+    Ok(ColladaModel { scene, warnings })
+}
 
 /// Loading a COLLADA document failed.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

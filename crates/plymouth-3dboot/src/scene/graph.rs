@@ -44,13 +44,59 @@ impl Transform {
     }
 }
 
-/// A node's transform relative to its parent.
+/// One element of a transform stack.
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TransformOpKind {
+    /// Translation.
+    Translate(Vec3),
+    /// Rotation by `angle` radians about `axis` (normalized when applied).
+    Rotate {
+        /// Rotation axis.
+        axis: Vec3,
+        /// Angle in radians (counter-clockwise looking down the axis).
+        angle: f32,
+    },
+    /// Non-uniform scale.
+    Scale(Vec3),
+    /// An arbitrary affine matrix.
+    Matrix(Mat4),
+}
+
+impl TransformOpKind {
+    /// The operation as a matrix.
+    #[must_use]
+    pub fn to_matrix(&self) -> Mat4 {
+        match *self {
+            Self::Translate(t) => Mat4::from_translation(t),
+            Self::Rotate { axis, angle } => axis
+                .try_normalize()
+                .map_or(Mat4::IDENTITY, |a| Mat4::from_axis_angle(a, angle)),
+            Self::Scale(s) => Mat4::from_scale(s),
+            Self::Matrix(m) => m,
+        }
+    }
+}
+
+/// A named element of a transform stack (COLLADA animations address the
+/// elements by their `sid`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransformOp {
+    /// Scoped id (may be empty).
+    pub sid: String,
+    /// The operation.
+    pub kind: TransformOpKind,
+}
+
+/// A node's transform relative to its parent.
+#[derive(Clone, Debug, PartialEq)]
 pub enum LocalTransform {
     /// Decomposed translation, rotation and scale (animatable per channel).
     Trs(Transform),
-    /// An arbitrary affine matrix (e.g. baked COLLADA transform stacks).
+    /// An arbitrary affine matrix.
     Matrix(Mat4),
+    /// A sequence of operations applied in order, as in COLLADA:
+    /// `ops[0] · ops[1] · … · point`.
+    Stack(Vec<TransformOp>),
 }
 
 impl Default for LocalTransform {
@@ -66,6 +112,9 @@ impl LocalTransform {
         match self {
             Self::Trs(t) => t.to_matrix(),
             Self::Matrix(m) => *m,
+            Self::Stack(ops) => ops
+                .iter()
+                .fold(Mat4::IDENTITY, |m, op| m * op.kind.to_matrix()),
         }
     }
 }
@@ -376,6 +425,43 @@ mod tests {
             * Mat4::from_scale(Vec3::new(1.0, 3.0, 0.5))
             * m;
         assert!(s.world_matrices()[b.0].abs_diff_eq(expected, 1e-5));
+    }
+
+    #[test]
+    fn transform_stack_applies_in_document_order() {
+        let stack = LocalTransform::Stack(vec![
+            TransformOp {
+                sid: "translate".into(),
+                kind: TransformOpKind::Translate(Vec3::new(1.0, 0.0, 0.0)),
+            },
+            TransformOp {
+                sid: "rotateZ".into(),
+                kind: TransformOpKind::Rotate {
+                    axis: Vec3::Z * 3.0,
+                    angle: FRAC_PI_2,
+                },
+            },
+            TransformOp {
+                sid: "scale".into(),
+                kind: TransformOpKind::Scale(Vec3::new(2.0, 1.0, 1.0)),
+            },
+        ]);
+        // Scale x by 2, rotate +x to +y, then translate.
+        let p = stack.to_matrix().transform_point3(Vec3::X);
+        assert!(p.abs_diff_eq(Vec3::new(1.0, 2.0, 0.0), 1e-6), "{p}");
+        assert_eq!(
+            LocalTransform::Stack(Vec::new()).to_matrix(),
+            Mat4::IDENTITY
+        );
+        let zero_axis = TransformOpKind::Rotate {
+            axis: Vec3::ZERO,
+            angle: 1.0,
+        };
+        assert_eq!(
+            zero_axis.to_matrix(),
+            Mat4::IDENTITY,
+            "degenerate axis is ignored"
+        );
     }
 
     #[test]

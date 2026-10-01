@@ -10,6 +10,9 @@ pub mod primitives;
 pub mod triangulate;
 
 pub use camera::{Camera, Projection};
-pub use graph::{LocalTransform, MeshId, Node, NodeId, Scene, SceneError, Transform};
+pub use graph::{
+    LocalTransform, MeshId, Node, NodeId, Scene, SceneError, Transform, TransformOp,
+    TransformOpKind,
+};
 pub use material::{Material, MaterialId};
 pub use mesh::{Mesh, MeshError, Submesh};

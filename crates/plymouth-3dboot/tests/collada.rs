@@ -1,0 +1,195 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! COLLADA scene loading (Phase 7.4).
+
+use plymouth_3dboot::io::MemResolver;
+use plymouth_3dboot::io::collada::{ColladaOptions, load_collada};
+use plymouth_3dboot::io::obj::{ObjOptions, load_obj};
+use plymouth_3dboot::math::{Mat4, Vec3};
+use plymouth_3dboot::scene::LocalTransform;
+
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/n64_logo");
+
+fn n64_dae() -> String {
+    std::fs::read_to_string(format!("{FIXTURES}/n64_logo.dae")).unwrap()
+}
+
+/// A single triangle under a node with the given transform elements, in a
+/// document with the given asset block.
+fn doc(asset: &str, transforms: &str) -> String {
+    format!(
+        r##"<COLLADA><asset>{asset}</asset>
+<library_geometries><geometry id="g"><mesh>
+  <source id="p"><float_array id="pa" count="9">0 0 0 1 0 0 0 1 0</float_array><technique_common><accessor source="#pa" count="3" stride="3"/></technique_common></source>
+  <vertices id="v"><input semantic="POSITION" source="#p"/></vertices>
+  <triangles count="1"><input semantic="VERTEX" source="#v" offset="0"/><p>0 1 2</p></triangles>
+</mesh></geometry></library_geometries>
+<library_visual_scenes><visual_scene id="vs"><node id="n" name="Tri">{transforms}<instance_geometry url="#g"/></node></visual_scene></library_visual_scenes>
+<scene><instance_visual_scene url="#vs"/></scene></COLLADA>"##
+    )
+}
+
+fn load(text: &str, options: ColladaOptions) -> plymouth_3dboot::io::collada::ColladaModel {
+    load_collada(text, &MemResolver::new(), &options).unwrap()
+}
+
+/// World position of mesh vertex 1 (at local (1, 0, 0)).
+fn world_vertex(model: &plymouth_3dboot::io::collada::ColladaModel) -> Vec3 {
+    let world = model.scene.world_matrices();
+    let (i, node) = model
+        .scene
+        .nodes()
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.mesh.is_some())
+        .unwrap();
+    world[i].transform_point3(model.scene.meshes()[node.mesh.unwrap().0].positions()[1])
+}
+
+#[test]
+fn transforms_apply_in_document_order() {
+    let m = load(
+        &doc(
+            "",
+            r#"<translate sid="t">0 0 5</translate><rotate sid="r">0 0 1 90</rotate><scale>2 2 2</scale>"#,
+        ),
+        ColladaOptions::default(),
+    );
+    let p = world_vertex(&m);
+    assert!(p.abs_diff_eq(Vec3::new(0.0, 2.0, 5.0), 1e-5), "{p}");
+    // Transform stacks keep their sids for animation.
+    let tri = m.scene.find_node("Tri").unwrap();
+    let LocalTransform::Stack(ops) = &m.scene.nodes()[tri.0].transform else {
+        panic!("stack expected")
+    };
+    assert_eq!(
+        ops.iter().map(|o| o.sid.as_str()).collect::<Vec<_>>(),
+        ["t", "r", ""]
+    );
+}
+
+#[test]
+fn matrix_is_row_major() {
+    let m = load(
+        &doc("", "<matrix>1 0 0 7  0 1 0 8  0 0 1 9  0 0 0 1</matrix>"),
+        ColladaOptions::default(),
+    );
+    assert!(world_vertex(&m).abs_diff_eq(Vec3::new(8.0, 8.0, 9.0), 1e-6));
+}
+
+#[test]
+fn z_up_and_units_are_converted() {
+    let text = doc(
+        r#"<unit meter="0.01"/><up_axis>Z_UP</up_axis>"#,
+        "<translate>0 0 100</translate>",
+    );
+    // Local (1,0,0) + (0,0,100) in centimetres, Z up -> (0.01, 1, 0) metres, Y up.
+    let p = world_vertex(&load(&text, ColladaOptions::default()));
+    assert!(p.abs_diff_eq(Vec3::new(0.01, 1.0, 0.0), 1e-6), "{p}");
+    let raw = world_vertex(&load(
+        &text,
+        ColladaOptions {
+            convert_up_axis: false,
+            convert_units: false,
+        },
+    ));
+    assert!(raw.abs_diff_eq(Vec3::new(1.0, 0.0, 100.0), 1e-6), "{raw}");
+}
+
+#[test]
+fn x_up_is_converted() {
+    let p = world_vertex(&load(
+        &doc("<up_axis>X_UP</up_axis>", ""),
+        ColladaOptions::default(),
+    ));
+    assert!(p.abs_diff_eq(Vec3::Y, 1e-6), "+X becomes +Y: {p}");
+}
+
+#[test]
+fn unbound_materials_and_unsupported_instances_warn() {
+    let text = doc("", "")
+        .replace(
+            r#"<triangles count="1">"#,
+            r#"<triangles count="1" material="sym">"#,
+        )
+        .replace(
+            "<instance_geometry",
+            r##"<instance_camera url="#c"/><instance_geometry"##,
+        );
+    let m = load(&text, ColladaOptions::default());
+    assert_eq!(m.scene.materials.len(), 1, "default material");
+    assert_eq!(m.warnings.len(), 2, "{:?}", m.warnings);
+}
+
+#[test]
+fn cyclic_instance_nodes_terminate() {
+    let text = r##"<COLLADA><library_nodes><node id="loop"><instance_node url="#loop"/></node></library_nodes>
+        <library_visual_scenes><visual_scene id="vs"><node><instance_node url="#loop"/></node></visual_scene></library_visual_scenes>
+        <scene><instance_visual_scene url="#vs"/></scene></COLLADA>"##;
+    let m = load(text, ColladaOptions::default());
+    assert!(
+        m.warnings.iter().any(|w| w.contains("cyclic")),
+        "{:?}",
+        m.warnings
+    );
+}
+
+#[test]
+fn errors_are_reported() {
+    assert!(
+        load_collada(
+            "<COLLADA><scene>",
+            &MemResolver::new(),
+            &ColladaOptions::default()
+        )
+        .is_err()
+    );
+    let dangling = doc("", "").replace(r##"url="#g""##, r##"url="#missing""##);
+    assert!(load_collada(&dangling, &MemResolver::new(), &ColladaOptions::default()).is_err());
+}
+
+#[test]
+fn n64_logo_scene() {
+    let m = load(&n64_dae(), ColladaOptions::default());
+    assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+    let s = &m.scene;
+    assert_eq!(s.meshes().len(), 1);
+    assert_eq!(s.meshes()[0].triangle_count(), 96);
+    assert_eq!(s.materials.len(), 4);
+    // collada root -> N64 -> N64_PIVOT -> geometry holder.
+    let names: Vec<&str> = s.nodes().iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["collada", "N64", "N64_PIVOT", "N64_PIVOT#geometry"]);
+
+    // Hand-computed world matrix of the geometry: up-axis and unit
+    // conversion, then the N64 node's translate/rotate/scale and the pivot.
+    let expected = Mat4::from_scale(Vec3::splat(0.0254))
+        * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+        * Mat4::from_translation(Vec3::new(-0.006047, 0.197258, 28.7307))
+        * Mat4::from_axis_angle(Vec3::NEG_X, (-90f32).to_radians())
+        * Mat4::from_scale(Vec3::new(1.18181, 0.896433, 1.16447))
+        * Mat4::from_translation(Vec3::new(0.022241, -32.05, 10.756));
+    let world = s.world_matrices();
+    assert!(
+        world[3].abs_diff_eq(expected, 1e-5),
+        "{}\nvs\n{expected}",
+        world[3]
+    );
+}
+
+/// 3ds Max's OBJ export bakes node transforms and converts to Y-up, so the
+/// DAE scene (after conversion) must match the OBJ positions in metres.
+#[test]
+fn n64_logo_dae_matches_obj_geometry() {
+    let dae = load(&n64_dae(), ColladaOptions::default()).scene;
+    let obj_src = std::fs::read_to_string(format!("{FIXTURES}/n64_logo.obj")).unwrap();
+    let obj = load_obj(&obj_src, &MemResolver::new(), &ObjOptions::default())
+        .unwrap()
+        .scene;
+    let (a, b) = (dae.bounds(), obj.bounds());
+    let b_m = plymouth_3dboot::math::Aabb::new(b.min * 0.0254, b.max * 0.0254);
+    assert!(
+        a.min.abs_diff_eq(b_m.min, 2e-3) && a.max.abs_diff_eq(b_m.max, 2e-3),
+        "DAE {a:?}\nOBJ {b_m:?}"
+    );
+    // Upright: tallest along +Y from the ground (y >= 0) like the OBJ.
+    assert!(a.min.y.abs() < 2e-3);
+}
