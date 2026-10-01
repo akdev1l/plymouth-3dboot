@@ -15,9 +15,12 @@ goldens.
 | NDC → depth buffer | NDC `z ∈ [-1, 1]` maps to depth `[0, 1]`. **Smaller is closer.** The buffer is cleared to `1.0`, and the default test is `Less`. |
 | Framebuffer | Origin at the **top left**, +x right, +y down. |
 
-Math uses `glam` (`f32`, column vectors, `Mat4 * Vec4`). Code must not depend
-on SIMD-specific behaviour: native and wasm renders are compared against the
-same goldens.
+Math uses `glam` (`f32`, column vectors, `Mat4 * Vec4`), built with
+`scalar-math` and `libm`, so no SIMD-specific or platform-libm behaviour can
+creep in. Transcendental functions (`sin`, `cos`, `acos`, `powf`, …) come
+from the `libm` crate, never the platform `f32`/`f64` methods; `clippy.toml`
+enforces this. As a result, native and wasm renders are **bit-identical** and
+compared against the same goldens exactly.
 
 ## Triangles
 

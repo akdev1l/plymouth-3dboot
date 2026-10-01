@@ -65,7 +65,7 @@ pub fn uv_sphere(radius: f32, segments: u32, rings: u32) -> Mesh {
         let (sin_t, cos_t) = match r {
             0 => (0.0, 1.0),
             r if r == rings => (0.0, -1.0),
-            _ => (theta.sin(), theta.cos()),
+            _ => (libm::sinf(theta), libm::cosf(theta)),
         };
         for s in 0..=segments {
             let u = s as f32 / segments as f32;
@@ -75,7 +75,7 @@ pub fn uv_sphere(radius: f32, segments: u32, rings: u32) -> Mesh {
             } else {
                 u * std::f32::consts::TAU
             };
-            let n = Vec3::new(sin_t * phi.sin(), cos_t, sin_t * phi.cos());
+            let n = Vec3::new(sin_t * libm::sinf(phi), cos_t, sin_t * libm::cosf(phi));
             positions.push(n * radius);
             normals.push(n);
             uvs.push(Vec2::new(u, v));

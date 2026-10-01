@@ -598,8 +598,8 @@ mod tests {
                 let mut points = Vec::with_capacity(gaps.len());
                 for g in &gaps {
                     points.push(snap_quarter(Vec2::new(
-                        cx + rx * angle.cos(),
-                        cy + ry * angle.sin(),
+                        cx + rx * libm::cosf(angle),
+                        cy + ry * libm::sinf(angle),
                     )));
                     angle += g / total * std::f32::consts::TAU;
                 }

@@ -140,7 +140,7 @@ pub fn with_crease_normals(mesh: &Mesh, crease_angle: f32) -> Mesh {
                 .push((ti, unit[ti] * corner_angle(p, t, k)));
         }
     }
-    let cos_limit = crease_angle.cos();
+    let cos_limit = libm::cosf(crease_angle);
     let mut corner = Vec::with_capacity(tris.len() * 3);
     for (ti, t) in tris.iter().enumerate() {
         for &v in t {
