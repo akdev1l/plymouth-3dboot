@@ -25,6 +25,7 @@ glam = { version = "0.33.12", default-features = false, features = ["std", "scal
 bytemuck = { version = "1.25.2", features = ["derive"] }
 libm = "0.2.16"
 png = "0.18.1"
+roxmltree = { version = "0.21.1", default-features = false, features = ["std", "positions"] }
 thiserror = "2.0.21"
 proptest = { version = "1.11.0", default-features = false, features = ["std", "bit-set"] }
 
