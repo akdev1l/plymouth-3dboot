@@ -230,6 +230,37 @@ impl Scene {
         Ok(id)
     }
 
+    /// A copy of the scene with a new node `root` as the parent of all
+    /// current roots. Returns the new scene and the root's id (always
+    /// `NodeId(0)`); every other node's id increases by one.
+    ///
+    /// Useful for animating a whole model, e.g. with
+    /// [`crate::anim::Clip::turntable`].
+    #[must_use]
+    pub fn wrapped_in_root(&self, root: Node) -> (Self, NodeId) {
+        let mut out = Self {
+            meshes: self.meshes.clone(),
+            materials: self.materials.clone(),
+            nodes: Vec::with_capacity(self.nodes.len() + 1),
+        };
+        let root_id = out
+            .add_node(
+                None,
+                Node {
+                    parent: None,
+                    children: Vec::new(),
+                    ..root
+                },
+            )
+            .expect("no references");
+        for node in &self.nodes {
+            let parent = node.parent.map_or(root_id, |p| NodeId(p.0 + 1));
+            out.add_node(Some(parent), node.clone())
+                .expect("parents precede children");
+        }
+        (out, root_id)
+    }
+
     /// All meshes.
     #[must_use]
     pub fn meshes(&self) -> &[Mesh] {
@@ -462,6 +493,36 @@ mod tests {
             Mat4::IDENTITY,
             "degenerate axis is ignored"
         );
+    }
+
+    #[test]
+    fn wrapping_in_a_root_preserves_world_transforms() {
+        let mut s = Scene::new();
+        let m = s.add_mesh(cube(1.0));
+        let a = s
+            .add_node(
+                None,
+                Node::new("a", trs(Vec3::X, Quat::IDENTITY, Vec3::ONE)),
+            )
+            .unwrap();
+        s.add_node(
+            Some(a),
+            Node::new("b", trs(Vec3::Y, Quat::IDENTITY, Vec3::ONE)).with_mesh(m),
+        )
+        .unwrap();
+        s.add_node(
+            None,
+            Node::new("c", trs(Vec3::Z, Quat::IDENTITY, Vec3::ONE)),
+        )
+        .unwrap();
+        let (w, root) = s.wrapped_in_root(Node::new("root", LocalTransform::default()));
+        assert_eq!(root, NodeId(0));
+        assert_eq!(w.nodes().len(), 4);
+        assert_eq!(w.roots().collect::<Vec<_>>(), vec![root]);
+        assert_eq!(w.nodes()[0].children(), &[NodeId(1), NodeId(3)]);
+        assert_eq!(w.nodes()[2].parent(), Some(NodeId(1)));
+        assert_eq!(&w.world_matrices()[1..], &s.world_matrices()[..]);
+        assert_eq!(w.bounds(), s.bounds());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Keyframe animation.
 
+pub mod builders;
 pub mod clip;
 pub mod pose;
 pub mod track;
