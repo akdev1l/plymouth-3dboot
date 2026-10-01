@@ -6,7 +6,7 @@ pub mod clip;
 pub mod screen;
 
 pub use clip::Clipper;
-pub use screen::ScreenVertex;
+pub use screen::{ScreenVertex, perspective_weights};
 
 use crate::math::{Mat4, Vec3, Vec4};
 
