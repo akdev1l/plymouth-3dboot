@@ -9,9 +9,9 @@ pub struct MaterialId(pub usize);
 
 /// Surface appearance parameters, in linear colour.
 ///
-/// Shading models use the subset they need: unlit
-/// shading uses `base_color + emissive`, Lambert adds diffuse lighting of
-/// `base_color`, and Blinn–Phong adds `specular` highlights of `shininess`.
+/// Shading models use the subset they need: unlit shading shows
+/// `base_color` as is; lit models add `emissive`, diffuse lighting of
+/// `base_color`, and (Blinn–Phong) `specular` highlights of `shininess`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Material {
     /// Name from the source file (may be empty).

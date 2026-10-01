@@ -13,6 +13,7 @@ pub mod math;
 pub mod pipeline;
 pub mod raster;
 pub mod scene;
+pub mod shading;
 pub mod target;
 
 /// Returns the version of this crate (`major.minor.patch`).

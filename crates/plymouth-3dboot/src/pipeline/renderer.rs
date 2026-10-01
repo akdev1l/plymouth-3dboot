@@ -88,6 +88,17 @@ pub struct DrawStats {
     pub fragments_written: usize,
 }
 
+impl std::ops::AddAssign for DrawStats {
+    fn add_assign(&mut self, o: Self) {
+        self.triangles += o.triangles;
+        self.degenerate += o.degenerate;
+        self.culled += o.culled;
+        self.rasterized += o.rasterized;
+        self.fragments_shaded += o.fragments_shaded;
+        self.fragments_written += o.fragments_written;
+    }
+}
+
 /// A draw call's input was invalid; nothing was drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
