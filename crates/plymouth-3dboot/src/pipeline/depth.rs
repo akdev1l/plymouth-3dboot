@@ -43,18 +43,6 @@ impl Default for DepthState {
     }
 }
 
-impl DepthState {
-    /// Tests `depth` against `stored`, updating `stored` if the test passes
-    /// and writes are enabled. Returns whether the fragment passed.
-    pub fn test_and_update(&self, depth: f32, stored: &mut f32) -> bool {
-        let pass = self.func.passes(depth, *stored);
-        if pass && self.write {
-            *stored = depth;
-        }
-        pass
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,21 +68,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_and_update_writes_only_on_pass_with_writes_enabled() {
-        let mut stored = 0.5;
-        assert!(!DepthState::default().test_and_update(0.7, &mut stored));
-        assert_eq!(stored, 0.5);
-        assert!(DepthState::default().test_and_update(0.25, &mut stored));
-        assert_eq!(stored, 0.25);
-        let read_only = DepthState {
-            write: false,
-            ..DepthState::default()
-        };
-        assert!(read_only.test_and_update(0.1, &mut stored));
-        assert_eq!(stored, 0.25);
-    }
-
     /// Draws flat-coloured triangles given in window coordinates (x, y,
     /// depth), with depth interpolated linearly in screen space.
     fn draw(fb: &mut Framebuffer, state: DepthState, tris: &[([Vec3; 3], Rgba8)]) {
@@ -111,7 +84,10 @@ mod tests {
             setup.for_each_pixel(scissor, |f| {
                 let z = f.interpolate(s.map(|v| v.position.z));
                 let stored = fb.depth.get_mut(f.x, f.y).expect("scissored");
-                if state.test_and_update(z, stored) {
+                if state.func.passes(z, *stored) {
+                    if state.write {
+                        *stored = z;
+                    }
                     *fb.color.get_mut(f.x, f.y).expect("scissored") = color;
                 }
             });

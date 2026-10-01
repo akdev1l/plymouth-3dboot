@@ -68,7 +68,8 @@ impl Viewport {
     /// window +y is down); NDC `z ∈ [-1, 1]` maps to depth `[0, 1]`.
     #[must_use]
     pub fn ndc_to_window(&self, ndc: Vec3) -> Vec3 {
-        // Window sizes are far below 2^24, so the u32 -> f32 conversions are exact.
+        // Exact up to 2^24, which covers every viewport the renderer accepts
+        // (each component at most MAX_DIMENSION).
         #[allow(clippy::cast_precision_loss)]
         let (x, y, w, h) = (
             self.x as f32,

@@ -324,7 +324,7 @@ mod tests {
             let tri = [a, b, c].map(|p| ClipVertex { position: p, varyings: p });
             let out = clip_all(tri);
             assert_valid(&out);
-            prop_assert!(out.len() <= 7, "a triangle clipped by 7 planes has at most 10 vertices");
+            prop_assert!(out.len() <= 8, "7 planes leave at most 10 vertices, i.e. 8 fan triangles");
         }
     }
 }

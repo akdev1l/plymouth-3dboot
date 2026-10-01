@@ -5,7 +5,7 @@ use super::{ClipVertex, Clipper, DepthState, ScreenVertex, perspective_weights};
 use crate::color::LinearRgba;
 use crate::math::Viewport;
 use crate::raster::{CullMode, Interpolate, Rect, TriangleSetup, Winding};
-use crate::target::Framebuffer;
+use crate::target::{Framebuffer, MAX_DIMENSION};
 
 /// Programmable vertex and fragment stages.
 ///
@@ -66,10 +66,17 @@ impl RenderState {
 }
 
 /// Counters describing what a draw call did.
+///
+/// Counts after clipping refer to the (sub-)triangles produced by the
+/// clipper, so one input triangle can count more than once.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DrawStats {
     /// Input triangles.
     pub triangles: usize,
+    /// Triangles (after clipping) that were degenerate once snapped to the
+    /// subpixel grid.
+    pub degenerate: usize,
     /// Triangles (after clipping) rejected by face culling.
     pub culled: usize,
     /// Triangles (after clipping) passed to the rasterizer.
@@ -87,6 +94,10 @@ pub enum DrawError {
     /// The index count is not a multiple of three.
     #[error("index count {0} is not a multiple of 3")]
     IndexCount(usize),
+    /// A viewport offset or size exceeds [`MAX_DIMENSION`]. The clipper's
+    /// guard band, and thus correct rasterization, relies on this limit.
+    #[error("viewport {0:?} exceeds the maximum dimension {MAX_DIMENSION}")]
+    Viewport(Viewport),
     /// An index refers past the end of the vertex array.
     #[error("index {index} out of range for {vertex_count} vertices")]
     IndexOutOfRange {
@@ -121,7 +132,7 @@ impl Renderer {
     /// # Errors
     ///
     /// Returns [`DrawError`] without drawing anything if `indices` are
-    /// malformed.
+    /// malformed or a viewport offset or size exceeds [`MAX_DIMENSION`].
     pub fn draw_indexed<S: Shader>(
         &mut self,
         target: &mut Framebuffer,
@@ -130,6 +141,13 @@ impl Renderer {
         vertices: &[S::Vertex],
         indices: &[u32],
     ) -> Result<DrawStats, DrawError> {
+        let vp = state.viewport;
+        if [vp.x, vp.y, vp.width, vp.height]
+            .iter()
+            .any(|&d| d > MAX_DIMENSION)
+        {
+            return Err(DrawError::Viewport(vp));
+        }
         if !indices.len().is_multiple_of(3) {
             return Err(DrawError::IndexCount(indices.len()));
         }
@@ -142,7 +160,6 @@ impl Renderer {
 
         let clip: Vec<ClipVertex<S::Varyings>> =
             vertices.iter().map(|v| shader.vertex(v)).collect();
-        let vp = state.viewport;
         let scissor = Rect {
             x0: vp.x,
             y0: vp.y,
@@ -161,6 +178,7 @@ impl Renderer {
             clipper.clip(input, |clipped| {
                 let screen = clipped.map(|v| ScreenVertex::from_clip(v, &vp));
                 let Some(setup) = TriangleSetup::new(screen.map(|v| v.xy())) else {
+                    stats.degenerate += 1;
                     return;
                 };
                 if state.cull.culls(setup.winding()) {
@@ -296,6 +314,7 @@ mod tests {
             stats,
             DrawStats {
                 triangles: 2,
+                degenerate: 0,
                 culled: 0,
                 rasterized: 2,
                 fragments_shaded: 48,
@@ -344,6 +363,61 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stats.fragments_written, 16);
+    }
+
+    #[test]
+    fn oversized_viewports_are_rejected() {
+        let mut target = fb(16, 16);
+        let (v, i) = full_screen_quad(0.0, RED);
+        let mut r = Renderer::new();
+        for vp in [
+            Viewport::new(30_000, 30_000),
+            Viewport {
+                x: MAX_DIMENSION + 1,
+                y: 0,
+                width: 4,
+                height: 4,
+            },
+        ] {
+            assert_eq!(
+                r.draw_indexed(&mut target, &RenderState::new(vp), &Passthrough, &v, &i),
+                Err(DrawError::Viewport(vp))
+            );
+        }
+        // The largest allowed viewport still draws its on-screen part.
+        let max = Viewport::new(MAX_DIMENSION, MAX_DIMENSION);
+        let big =
+            [(-1.0, 1.0), (3.9, 1.0), (-1.0, -1.0)].map(|(x, y)| (Vec4::new(x, y, 0.0, 1.0), RED));
+        let stats = r
+            .draw_indexed(
+                &mut target,
+                &RenderState::new(max),
+                &Passthrough,
+                &big,
+                &[0, 1, 2],
+            )
+            .unwrap();
+        assert_eq!(stats.fragments_written, 256, "{stats:?}");
+    }
+
+    #[test]
+    fn degenerate_triangles_are_counted() {
+        let mut target = fb(4, 4);
+        let v = [
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+            Vec4::new(0.5, 0.5, 0.0, 1.0),
+            Vec4::new(1.0, 1.0, 0.0, 1.0),
+        ];
+        let stats = Renderer::new()
+            .draw_indexed(
+                &mut target,
+                &RenderState::new(Viewport::new(4, 4)),
+                &Stripes,
+                &v,
+                &[0, 1, 2],
+            )
+            .unwrap();
+        assert_eq!((stats.degenerate, stats.rasterized), (1, 0));
     }
 
     #[test]
