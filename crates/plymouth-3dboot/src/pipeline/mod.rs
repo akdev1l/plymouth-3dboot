@@ -2,6 +2,10 @@
 //! The 3D pipeline: vertex transformation, clipping, projection to the
 //! window, and per-fragment interpolation and depth testing.
 
+pub mod clip;
+
+pub use clip::Clipper;
+
 use crate::math::{Mat4, Vec3, Vec4};
 
 /// A vertex in homogeneous clip space with its attributes ("varyings").
