@@ -20,7 +20,9 @@ plymouth-3dboot-sdl = { path = "crates/plymouth-3dboot-sdl" }
 # scalar-math + libm: identical results on native and wasm (no SIMD paths,
 # no platform libm), see docs/conventions.md.
 glam = { version = "0.33.12", default-features = false, features = ["std", "scalar-math", "libm"] }
+bytemuck = { version = "1.25.2", features = ["derive"] }
 libm = "0.2.16"
+thiserror = "2.0.21"
 proptest = { version = "1.11.0", default-features = false, features = ["std", "bit-set"] }
 
 [workspace.lints.rust]

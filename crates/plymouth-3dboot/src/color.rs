@@ -43,7 +43,7 @@ pub fn unorm8(c: f32) -> u8 {
 
 /// An sRGB-encoded 8-bit colour with straight alpha, in `R, G, B, A` byte
 /// order (the framebuffer pixel format).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct Rgba8 {
     /// Red.

@@ -9,6 +9,7 @@
 
 pub mod color;
 pub mod math;
+pub mod target;
 
 /// Returns the version of this crate (`major.minor.patch`).
 #[must_use]
