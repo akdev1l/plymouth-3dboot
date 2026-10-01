@@ -139,7 +139,7 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
 
 **0.3 Dev wrapper script**
 - `scripts/dev.sh <cmd>` runs the command in the container.
-- It mounts the repo at `/work:Z` for SELinux and uses named volumes for the cargo and emscripten caches.
+- It mounts the repo at `/work:z` (shared SELinux label, so several containers can run at once), maps the host user onto the image's uid 1000, and uses named volumes for the cargo cache and the emscripten cache. The emscripten volume is keyed by image hash.
 - *Tests:* `scripts/dev.sh cargo --version`.
 - *Commit:* `build: add dev container wrapper script`
 
@@ -158,7 +158,7 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
   - runner = `node`
   - link args `-sALLOW_MEMORY_GROWTH=1`, plus `-sNODERAWFS=1` for test binaries only
   - panic and exception strategy as determined in the 0.6 spike
-- *Tests:* `cargo test -p plymouth-3dboot --target wasm32-unknown-emscripten` runs the smoke test under node.
+- *Tests:* `just test-wasm` (which adds NODERAWFS) runs the core tests under node.
 - *Commit:* `build: configure wasm32-unknown-emscripten target and node runner`
 
 **0.6 Toolchain spike: SDL on both targets** (kept as the `sdl_smoke` example in the SDL crate)

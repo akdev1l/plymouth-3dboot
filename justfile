@@ -2,6 +2,8 @@
 #
 # Task runner. Run inside the dev container: `scripts/dev.sh just <recipe>`.
 
+set positional-arguments
+
 wasm_target := "wasm32-unknown-emscripten"
 # Test binaries need host filesystem access under node (see docs/toolchain.md).
 wasm_test_flags := "--target " + wasm_target + " --target-dir target/wasm-test --config 'target." + wasm_target + ".rustflags=[\"-Clink-arg=-sNODERAWFS=1\"]'"
@@ -28,12 +30,12 @@ clippy:
 
 # Native tests (nextest) and doctests.
 test *args:
-    cargo nextest run --locked --workspace --no-tests=pass {{args}}
+    cargo nextest run --locked --workspace --no-tests=pass "$@"
     cargo test --locked --workspace --doc
 
 # Tests compiled to wasm and run under node.
 test-wasm *args:
-    cargo test --locked --workspace {{wasm_test_flags}} {{args}}
+    cargo test --locked --workspace {{wasm_test_flags}} "$@"
 
 # Build every target for wasm.
 build-wasm:

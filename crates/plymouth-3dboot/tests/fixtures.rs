@@ -12,7 +12,13 @@ fn fixture(name: &str) -> PathBuf {
 
 fn read(name: &str) -> Vec<u8> {
     let path = fixture(name);
-    std::fs::read(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "reading {}: {e} (on wasm, run through `just test-wasm`, which links \
+             test binaries with NODERAWFS for host filesystem access)",
+            path.display()
+        )
+    })
 }
 
 #[test]

@@ -90,6 +90,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Box::into_raw(Box::new(State::new()?));
     // SAFETY: `tick` matches the expected callback ABI and `state` stays
     // valid forever (it is intentionally leaked to the browser main loop).
-    unsafe { emscripten_set_main_loop_arg(tick, state.cast(), 0, 1) };
+    // `simulate_infinite_loop = 0`: `main` returns normally and the runtime
+    // stays alive (EXIT_RUNTIME defaults to off). The alternative throws a
+    // JS exception through Rust frames, which is unsound with wasm exceptions.
+    unsafe { emscripten_set_main_loop_arg(tick, state.cast(), 0, 0) };
     Ok(())
 }
