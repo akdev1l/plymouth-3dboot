@@ -48,6 +48,39 @@ impl Rect {
     }
 }
 
+/// The winding of a triangle's vertices as seen by the viewer (in NDC,
+/// +y up), which is opposite to how they wind in window coordinates (+y down).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Winding {
+    /// Counter-clockwise as seen by the viewer: front-facing by convention.
+    CounterClockwise,
+    /// Clockwise as seen by the viewer: back-facing by convention.
+    Clockwise,
+}
+
+/// Which triangles to discard based on their [`Winding`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CullMode {
+    /// Keep every triangle.
+    #[default]
+    None,
+    /// Discard back faces (clockwise as seen by the viewer).
+    Back,
+    /// Discard front faces (counter-clockwise as seen by the viewer).
+    Front,
+}
+
+impl CullMode {
+    /// Whether a triangle with `winding` is discarded.
+    #[must_use]
+    pub fn culls(self, winding: Winding) -> bool {
+        matches!(
+            (self, winding),
+            (Self::Back, Winding::Clockwise) | (Self::Front, Winding::CounterClockwise)
+        )
+    }
+}
+
 /// A covered pixel, as passed to [`TriangleSetup::for_each_pixel`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fragment {
@@ -72,6 +105,8 @@ pub struct TriangleSetup {
     order: [usize; 3],
     /// Twice the triangle area in subpixel units squared (> 0).
     double_area: i64,
+    /// Winding of the caller's vertex order, as seen by the viewer.
+    winding: Winding,
     /// Pixel bounds `[min, max]` inclusive, possibly negative.
     min: (i64, i64),
     max: (i64, i64),
@@ -95,9 +130,11 @@ impl TriangleSetup {
             FixedPoint::from_window(vertices[2])?,
         ];
         let signed = EdgeFunction::new(p[0], p[1]).eval(p[2]);
-        let order = match signed.signum() {
-            1 => [0, 1, 2],
-            -1 => [0, 2, 1],
+        // Positive orientation in window space (+y down) is counter-clockwise
+        // as seen by the viewer (+y up).
+        let (order, winding) = match signed.signum() {
+            1 => ([0, 1, 2], Winding::CounterClockwise),
+            -1 => ([0, 2, 1], Winding::Clockwise),
             _ => return None,
         };
         let v = order.map(|i| p[i]);
@@ -115,6 +152,7 @@ impl TriangleSetup {
             edges,
             order,
             double_area: signed.abs(),
+            winding,
             min: (
                 ceil_div(min_x - half, SUBPIXEL_SCALE),
                 ceil_div(min_y - half, SUBPIXEL_SCALE),
@@ -124,6 +162,19 @@ impl TriangleSetup {
                 (max_y - half).div_euclid(SUBPIXEL_SCALE),
             ),
         })
+    }
+
+    /// Like [`TriangleSetup::new`], but also returns `None` if `cull`
+    /// discards the triangle.
+    #[must_use]
+    pub fn new_culled(vertices: [Vec2; 3], cull: CullMode) -> Option<Self> {
+        Self::new(vertices).filter(|t| !cull.culls(t.winding))
+    }
+
+    /// Winding of the vertices (in the order given), as seen by the viewer.
+    #[must_use]
+    pub fn winding(&self) -> Winding {
+        self.winding
     }
 
     /// Twice the triangle's area, in subpixel units squared (always > 0).
@@ -239,6 +290,47 @@ mod tests {
         both.extend(pixels([a, c, d], SCREEN));
         let expected: BTreeSet<_> = (0..4).flat_map(|y| [(0, y), (1, y)]).collect();
         assert_eq!(both, expected);
+    }
+
+    #[test]
+    fn winding_is_reported_as_seen_by_the_viewer() {
+        // On screen (+y down) this goes right, then down-left: clockwise on
+        // screen, hence counter-clockwise in NDC (+y up).
+        let ccw = [v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)];
+        let cw = [ccw[0], ccw[2], ccw[1]];
+        assert_eq!(
+            TriangleSetup::new(ccw).unwrap().winding(),
+            Winding::CounterClockwise
+        );
+        assert_eq!(
+            TriangleSetup::new(cw).unwrap().winding(),
+            Winding::Clockwise
+        );
+        // Rotating the vertex order keeps the winding.
+        assert_eq!(
+            TriangleSetup::new([ccw[1], ccw[2], ccw[0]])
+                .unwrap()
+                .winding(),
+            Winding::CounterClockwise
+        );
+    }
+
+    #[test]
+    fn cull_modes() {
+        use CullMode::{Back, Front, None};
+        use Winding::{Clockwise, CounterClockwise};
+        assert!(!None.culls(Clockwise) && !None.culls(CounterClockwise));
+        assert!(Back.culls(Clockwise) && !Back.culls(CounterClockwise));
+        assert!(Front.culls(CounterClockwise) && !Front.culls(Clockwise));
+        assert_eq!(CullMode::default(), None);
+
+        let ccw = [v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)];
+        let cw = [ccw[0], ccw[2], ccw[1]];
+        assert!(TriangleSetup::new_culled(ccw, Back).is_some());
+        assert!(TriangleSetup::new_culled(cw, Back).is_none());
+        assert!(TriangleSetup::new_culled(ccw, Front).is_none());
+        assert!(TriangleSetup::new_culled(cw, Front).is_some());
+        assert!(TriangleSetup::new_culled(cw, None).is_some());
     }
 
     #[test]

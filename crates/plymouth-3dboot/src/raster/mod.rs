@@ -11,4 +11,4 @@ pub mod edge;
 pub mod fixed;
 pub mod triangle;
 
-pub use triangle::{Fragment, Rect, TriangleSetup};
+pub use triangle::{CullMode, Fragment, Rect, TriangleSetup, Winding};
