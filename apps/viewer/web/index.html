@@ -17,16 +17,17 @@
   <canvas id="canvas" width="640" height="480" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
   <div id="status">Loading…</div>
   <script>
-    var status = document.getElementById('status');
+    // Not `status`: a global of that name would alias window.status.
+    var statusLine = document.getElementById('status');
     var Module = {
       canvas: document.getElementById('canvas'),
       print: function (text) { console.log(text); },
       printErr: function (text) { console.error(text); },
       onRuntimeInitialized: function () {
-        status.textContent = 'Drag to orbit, scroll to zoom, Space to pause, R to reset.';
+        statusLine.textContent = 'Drag to orbit, scroll to zoom, Space to pause, R to reset.';
         document.body.dataset.ready = 'true';
       },
-      onAbort: function (what) { status.textContent = 'Error: ' + what; },
+      onAbort: function (what) { statusLine.textContent = 'Error: ' + what; },
     };
   </script>
   <script async src="plymouth-3dboot-viewer.js"></script>

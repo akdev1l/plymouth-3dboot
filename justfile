@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl viewer-web deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl browser-smoke deny
 
 # Format all code.
 fmt:
@@ -65,6 +65,10 @@ viewer-web:
     @ls -l target/web
     @size=$(stat -c %s target/web/plymouth_3dboot_viewer.wasm); \
         if [ "$size" -gt {{web_wasm_budget}} ]; then echo "wasm is $size bytes, over the {{web_wasm_budget}} budget"; exit 1; fi
+
+# Load the web viewer in headless Chromium and check what it renders.
+browser-smoke: viewer-web
+    PLYMOUTH_BROWSER=chromium-headless-shell cargo nextest run --locked -p plymouth-3dboot-viewer --test browser --no-capture
 
 # Licence, advisory, ban and source policy (deny.toml).
 deny:

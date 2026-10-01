@@ -91,6 +91,15 @@ RUN git clone --depth 1 --branch "${EMSDK_VERSION}" \
 ENV EMSDK=/opt/emsdk \
     EMSDK_NODE=/opt/emsdk/node/current/node \
     PATH=/opt/emsdk:/opt/emsdk/upstream/emscripten:/opt/emsdk/node/current:${PATH}
+# Headless Chromium for the web viewer smoke test (`just browser-smoke`).
+# A separate layer so it does not invalidate the toolchain layers above.
+USER root
+RUN apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends \
+        chromium-headless-shell=154.0.8037.57-1~deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+USER dev
+
 # Tools stay in /usr/local/cargo/bin (on PATH); the registry cache is per-user
 # and mounted as a volume by scripts/dev.sh.
 ENV CARGO_HOME=/home/dev/.cargo \
