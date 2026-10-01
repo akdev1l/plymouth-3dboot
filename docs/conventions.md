@@ -10,7 +10,7 @@ goldens.
 | Space | Convention |
 |---|---|
 | World / model | Right-handed, **Y-up**, units in **metres**. Loaders convert the source up-axis and units (e.g. COLLADA `Z_UP`, `<unit meter="0.0254">`). |
-| View | Camera looks down **−Z**, +Y up (as in `glam`'s `look_at_rh`). |
+| View | Camera looks down **−Z**, +Y up (`glam::camera::rh`). |
 | Clip | OpenGL style: visible when `-w ≤ x, y, z ≤ w`, with `w > 0`. |
 | NDC → depth buffer | NDC `z ∈ [-1, 1]` maps to depth `[0, 1]`. **Smaller is closer.** The buffer is cleared to `1.0`, and the default test is `Less`. |
 | Framebuffer | Origin at the **top left**, +x right, +y down. |

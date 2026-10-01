@@ -17,6 +17,10 @@ publish = false
 [workspace.dependencies]
 plymouth-3dboot = { path = "crates/plymouth-3dboot" }
 plymouth-3dboot-sdl = { path = "crates/plymouth-3dboot-sdl" }
+# scalar-math + libm: identical results on native and wasm (no SIMD paths,
+# no platform libm), see docs/conventions.md.
+glam = { version = "0.33.12", default-features = false, features = ["std", "scalar-math", "libm"] }
+proptest = { version = "1.11.0", default-features = false, features = ["std", "bit-set"] }
 
 [workspace.lints.rust]
 missing_docs = "warn"

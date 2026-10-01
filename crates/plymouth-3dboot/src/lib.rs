@@ -7,6 +7,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod math;
+
 /// Returns the version of this crate (`major.minor.patch`).
 #[must_use]
 pub const fn version() -> &'static str {
