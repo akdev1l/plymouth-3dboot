@@ -2,25 +2,42 @@
 //! Interactive viewer for `plymouth-3dboot` models.
 //!
 //! Usage: `plymouth-3dboot-viewer [MODEL.obj|MODEL.dae] [--shading unlit|lambert|blinn-phong]
-//! [--frames N] [--max-resolution PX]`
+//! [--turntable SECONDS | --still] [--frames N] [--max-resolution PX]`
 //!
-//! Without a model the embedded N64 logo is shown. Drag with the left mouse
-//! button to orbit, scroll to zoom, Space to pause, +/- to change speed,
-//! R to reset, Escape or Q to quit.
+//! Without a model the embedded N64 logo is shown. The model spins on a
+//! turntable (one turn per 6 s by default) unless `--still` is given.
+//! Drag with the left mouse button to orbit, scroll to zoom, Space to pause,
+//! +/- to change speed, R to reset, Escape or Q to quit.
 
 mod model;
 mod viewer;
 
+use plymouth_3dboot::anim::Clip;
+use plymouth_3dboot::math::Vec3;
+use plymouth_3dboot::scene::{LocalTransform, Node};
 use plymouth_3dboot::shading::ShadingModel;
 use plymouth_3dboot_sdl::{Presenter, RunOptions, WindowConfig, run};
 use viewer::{Viewer, ViewerOptions};
 
 /// Parsed command line.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Args {
     model: Option<std::path::PathBuf>,
     options: ViewerOptions,
     frames: Option<u64>,
+    /// Seconds per turntable revolution; `None` for a still model.
+    turntable: Option<f32>,
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            model: None,
+            options: ViewerOptions::default(),
+            frames: None,
+            turntable: Some(6.0),
+        }
+    }
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
@@ -37,6 +54,16 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
                     other => return Err(format!("unknown shading model {other:?}")),
                 }
             }
+            "--turntable" => {
+                let period: f32 = value("--turntable")?
+                    .parse()
+                    .map_err(|e| format!("--turntable: {e}"))?;
+                if !(period.is_finite() && period > 0.0) {
+                    return Err("--turntable needs a positive number of seconds".into());
+                }
+                out.turntable = Some(period);
+            }
+            "--still" => out.turntable = None,
             "--frames" => {
                 out.frames = Some(
                     value("--frames")?
@@ -75,7 +102,15 @@ fn try_main() -> Result<(), String> {
         ..WindowConfig::default()
     })
     .map_err(|e| e.to_string())?;
-    let viewer = Viewer::new(scene, args.options);
+    let (scene, clip) = match args.turntable {
+        Some(period) => {
+            let (scene, root) =
+                scene.wrapped_in_root(Node::new("turntable", LocalTransform::default()));
+            (scene, Some(Clip::turntable(root, Vec3::Y, period)))
+        }
+        None => (scene, None),
+    };
+    let viewer = Viewer::new(scene, clip, args.options);
     let options = RunOptions {
         max_frames: args.frames,
         ..RunOptions::default()
@@ -110,12 +145,17 @@ mod tests {
             (ShadingModel::Lambert, Some(3), 200)
         );
         assert!(parse(&[]).unwrap().model.is_none());
+        assert_eq!(parse(&[]).unwrap().turntable, Some(6.0));
+        assert_eq!(parse(&["--turntable", "2.5"]).unwrap().turntable, Some(2.5));
+        assert_eq!(parse(&["--still"]).unwrap().turntable, None);
     }
 
     #[test]
     fn rejects_bad_arguments() {
         for bad in [
-            &["--shading", "toon"][..],
+            &["--turntable", "0"][..],
+            &["--turntable", "x"],
+            &["--shading", "toon"],
             &["--frames"],
             &["--frames", "x"],
             &["--bogus"],

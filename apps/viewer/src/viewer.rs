@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The viewer's application logic (independent of SDL, unit-testable).
 
+use plymouth_3dboot::anim::{Clip, Pose, WrapMode};
 use plymouth_3dboot::color::Rgba8;
 use plymouth_3dboot::math::{Aabb, Vec3, Viewport};
 use plymouth_3dboot::pipeline::{RenderState, Renderer};
@@ -126,6 +127,7 @@ pub fn frame_size((w, h): (u32, u32), max: u32) -> (u32, u32) {
 /// The model viewer.
 pub struct Viewer {
     scene: Scene,
+    clip: Option<Clip>,
     bounds: Aabb,
     options: ViewerOptions,
     lighting: Lighting,
@@ -136,12 +138,13 @@ pub struct Viewer {
 }
 
 impl Viewer {
-    /// A viewer showing `scene`.
+    /// A viewer showing `scene`, playing `clip` (looped) if given.
     #[must_use]
-    pub fn new(scene: Scene, options: ViewerOptions) -> Self {
+    pub fn new(scene: Scene, clip: Option<Clip>, options: ViewerOptions) -> Self {
         let bounds = scene.bounds();
         Self {
             scene,
+            clip,
             bounds,
             options,
             lighting: Lighting::default(),
@@ -200,7 +203,15 @@ impl App for Viewer {
         };
         let mut state = RenderState::new(Viewport::new(w, h));
         state.cull = CullMode::Back;
-        let world = self.scene.world_matrices();
+        let pose = match &self.clip {
+            Some(clip) => Pose::evaluate(
+                &self.scene,
+                clip,
+                clip.local_time(self.state.time, WrapMode::Loop),
+            ),
+            None => Pose::rest(&self.scene),
+        };
+        let world = pose.world(&self.scene);
         if let Err(e) = draw_scene(
             &mut self.renderer,
             &mut self.target,
@@ -277,9 +288,39 @@ mod tests {
     }
 
     #[test]
+    fn playback_follows_time_pause_and_speed() {
+        use plymouth_3dboot::scene::{LocalTransform, Node};
+        let (scene, root) = crate::model::embedded_n64()
+            .unwrap()
+            .wrapped_in_root(Node::new("spin", LocalTransform::default()));
+        let clip = Clip::turntable(root, Vec3::Y, 4.0);
+        let options = ViewerOptions {
+            max_resolution: 48,
+            ..ViewerOptions::default()
+        };
+        let mut v = Viewer::new(scene, Some(clip), options);
+        let start = v.render((48, 48)).clone();
+        v.update(&[], 0.5);
+        let moved = v.render((48, 48)).clone();
+        assert_ne!(start, moved, "the model turns over time");
+        v.update(&[InputEvent::TogglePause], 0.5);
+        assert_eq!(v.render((48, 48)), &moved, "paused");
+        v.update(&[InputEvent::TogglePause, InputEvent::Faster], 0.0);
+        v.update(&[], 1.75);
+        // 0.5 s + 1.75 s at double speed = 4 s: a full turn.
+        assert!((v.state.time - 4.0).abs() < 1e-9);
+        assert_eq!(
+            v.render((48, 48)),
+            &start,
+            "back to the start after one period"
+        );
+    }
+
+    #[test]
     fn update_quits_and_renders_at_capped_size() {
         let mut v = Viewer::new(
             crate::model::embedded_n64().unwrap(),
+            None,
             ViewerOptions {
                 max_resolution: 64,
                 ..ViewerOptions::default()
