@@ -5,9 +5,11 @@
 //! using one of the [`ShadingModel`]s. The individual shaders are public, so
 //! they can also be used directly with [`Renderer::draw_indexed`].
 
+mod blinn_phong;
 mod lambert;
 mod unlit;
 
+pub use blinn_phong::BlinnPhongShader;
 pub use lambert::LambertShader;
 pub use unlit::UnlitShader;
 
@@ -58,6 +60,9 @@ pub enum ShadingModel {
     Unlit,
     /// Diffuse lighting ([`LambertShader`]); needs vertex normals.
     Lambert,
+    /// Diffuse plus specular highlights ([`BlinnPhongShader`]); needs vertex
+    /// normals.
+    BlinnPhong,
 }
 
 /// Errors from [`draw_mesh`].
@@ -93,6 +98,8 @@ struct Transforms {
     mvp: Mat4,
     /// Model-to-world.
     world: Mat4,
+    /// Camera position in world space.
+    eye: Vec3,
 }
 
 impl Transforms {
@@ -100,6 +107,7 @@ impl Transforms {
         Self {
             mvp: camera.view_projection(aspect) * world,
             world,
+            eye: camera.position(),
         }
     }
 
@@ -169,6 +177,13 @@ pub fn draw_mesh(
                     params.lighting,
                 )
                 .ok_or(ShadeError::MissingNormals)?;
+                renderer.draw_indexed(target, &sub_state, &shader, n, indices)?
+            }
+            ShadingModel::BlinnPhong => {
+                let t = &transforms;
+                let shader =
+                    BlinnPhongShader::new(t.mvp, t.world, t.eye, mesh, material, params.lighting)
+                        .ok_or(ShadeError::MissingNormals)?;
                 renderer.draw_indexed(target, &sub_state, &shader, n, indices)?
             }
         };

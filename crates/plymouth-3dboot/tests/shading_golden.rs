@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use plymouth_3dboot::color::Rgba8;
+use plymouth_3dboot::color::{LinearRgba, Rgba8};
 use plymouth_3dboot::math::{Mat4, Vec3, Viewport};
 use plymouth_3dboot::pipeline::{RenderState, Renderer};
 use plymouth_3dboot::raster::CullMode;
@@ -69,4 +69,17 @@ fn lambert_sphere() {
     let material = Material::with_color("orange", Rgba8::new(240, 130, 20, 255).to_linear());
     let image = render_sphere(ShadingModel::Lambert, &material).color;
     golden!().assert("shading_lambert_sphere", &image, Tolerance::EXACT);
+}
+
+#[test]
+fn blinn_phong_sphere() {
+    let material = Material {
+        specular: LinearRgba::rgb(0.6, 0.6, 0.6),
+        shininess: 32.0,
+        ..Material::with_color("orange", Rgba8::new(240, 130, 20, 255).to_linear())
+    };
+    let image = render_sphere(ShadingModel::BlinnPhong, &material).color;
+    golden!().assert("shading_blinn_phong_sphere", &image, Tolerance::EXACT);
+    // The highlight makes it differ from plain diffuse shading.
+    assert_ne!(image, render_sphere(ShadingModel::Lambert, &material).color);
 }
