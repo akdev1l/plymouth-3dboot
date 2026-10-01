@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod color;
 pub mod math;
 
 /// Returns the version of this crate (`major.minor.patch`).

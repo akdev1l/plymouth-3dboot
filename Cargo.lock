@@ -88,6 +88,7 @@ name = "plymouth-3dboot"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "libm",
  "proptest",
 ]
 
