@@ -48,8 +48,12 @@ impl Rect {
     }
 }
 
-/// The winding of a triangle's vertices as seen by the viewer (in NDC,
-/// +y up), which is opposite to how they wind in window coordinates (+y down).
+/// The winding of a triangle's vertices as seen on screen (equivalently, in
+/// NDC with +y up).
+///
+/// Window coordinates have +y down, so a triangle that winds
+/// counter-clockwise on screen has a *negative* signed area
+/// `(v1 - v0) × (v2 - v0)` when computed from window coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Winding {
     /// Counter-clockwise as seen by the viewer: front-facing by convention.
@@ -153,11 +157,11 @@ impl TriangleSetup {
             FixedPoint::from_window(vertices[2])?,
         ];
         let signed = EdgeFunction::new(p[0], p[1]).eval(p[2]);
-        // Positive orientation in window space (+y down) is counter-clockwise
-        // as seen by the viewer (+y up).
+        // A positive signed area in window space (+y down) is clockwise as
+        // seen on screen.
         let (order, winding) = match signed.signum() {
-            1 => ([0, 1, 2], Winding::CounterClockwise),
-            -1 => ([0, 2, 1], Winding::Clockwise),
+            1 => ([0, 1, 2], Winding::Clockwise),
+            -1 => ([0, 2, 1], Winding::CounterClockwise),
             _ => return None,
         };
         let v = order.map(|i| p[i]);
@@ -320,24 +324,39 @@ mod tests {
     }
 
     #[test]
-    fn winding_is_reported_as_seen_by_the_viewer() {
-        // On screen (+y down) this goes right, then down-left: clockwise on
-        // screen, hence counter-clockwise in NDC (+y up).
-        let ccw = [v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)];
-        let cw = [ccw[0], ccw[2], ccw[1]];
-        assert_eq!(
-            TriangleSetup::new(ccw).unwrap().winding(),
-            Winding::CounterClockwise
-        );
+    fn winding_is_reported_as_seen_on_screen() {
+        // On screen (+y down) this goes right along the top, then to the
+        // bottom-left: clockwise as seen.
+        let cw = [v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)];
+        let ccw = [cw[0], cw[2], cw[1]];
         assert_eq!(
             TriangleSetup::new(cw).unwrap().winding(),
             Winding::Clockwise
         );
+        assert_eq!(
+            TriangleSetup::new(ccw).unwrap().winding(),
+            Winding::CounterClockwise
+        );
         // Rotating the vertex order keeps the winding.
         assert_eq!(
-            TriangleSetup::new([ccw[1], ccw[2], ccw[0]])
-                .unwrap()
-                .winding(),
+            TriangleSetup::new([cw[1], cw[2], cw[0]]).unwrap().winding(),
+            Winding::Clockwise
+        );
+    }
+
+    #[test]
+    fn ndc_counter_clockwise_is_counter_clockwise_on_screen() {
+        use crate::math::{Vec3, Viewport};
+        // Counter-clockwise in NDC (+y up): bottom-left, bottom-right, top-right.
+        let vp = Viewport::new(10, 10);
+        let ndc = [
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        ];
+        let window = ndc.map(|p| vp.ndc_to_window(p).truncate());
+        assert_eq!(
+            TriangleSetup::new(window).unwrap().winding(),
             Winding::CounterClockwise
         );
     }
@@ -351,8 +370,8 @@ mod tests {
         assert!(Front.culls(CounterClockwise) && !Front.culls(Clockwise));
         assert_eq!(CullMode::default(), None);
 
-        let ccw = [v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)];
-        let cw = [ccw[0], ccw[2], ccw[1]];
+        let cw = [v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)];
+        let ccw = [cw[0], cw[2], cw[1]];
         assert!(TriangleSetup::new_culled(ccw, Back).is_some());
         assert!(TriangleSetup::new_culled(cw, Back).is_none());
         assert!(TriangleSetup::new_culled(ccw, Front).is_none());

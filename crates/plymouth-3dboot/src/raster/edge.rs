@@ -8,8 +8,8 @@ use super::fixed::{FixedPoint, SUBPIXEL_SCALE};
 ///
 /// In window coordinates (+y down), `E(p) > 0` for points to the right of
 /// the edge when walking from `p0` to `p1` as seen on screen. A triangle
-/// whose three edges are all positive inside is said to have positive
-/// orientation.
+/// whose three edges are all positive inside has positive orientation; it
+/// winds clockwise as seen on screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EdgeFunction {
     /// Coefficient of x (`p0.y - p1.y`).
