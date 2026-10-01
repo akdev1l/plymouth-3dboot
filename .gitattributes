@@ -1,0 +1,4 @@
+# Fixtures are byte-exact copies (some use CRLF line endings on purpose).
+tests/fixtures/** -text
+# Golden images
+*.png binary
