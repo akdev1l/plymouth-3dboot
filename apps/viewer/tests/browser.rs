@@ -108,6 +108,11 @@ fn web_viewer_renders_the_n64_logo() {
         dom.contains("data-ready=\"true\""),
         "page did not initialize:\n{dom}"
     );
+    assert!(
+        // Match the element: the inline script also contains this text.
+        dom.contains("<div id=\"status\">Drag to orbit"),
+        "status line was not updated:\n{dom}"
+    );
 
     // The canvas shows the logo in its exact colours.
     let shot = std::env::temp_dir().join(format!("p3b-browser-{}.png", std::process::id()));
