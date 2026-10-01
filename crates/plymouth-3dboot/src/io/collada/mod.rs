@@ -4,7 +4,9 @@
 //! A documented subset of COLLADA 1.4/1.5 is supported; unsupported
 //! elements are skipped with a warning rather than failing the load.
 
-// Used by the geometry/material/scene loaders added next.
+// Used by the material and scene loaders added next.
+#[allow(dead_code)]
+mod geometry;
 #[allow(dead_code)]
 mod xml;
 
@@ -34,6 +36,21 @@ pub enum ColladaError {
         /// The offending text.
         text: String,
         /// Line of the element.
+        line: u32,
+    },
+    /// The data is structurally invalid (e.g. a mesh cannot be built).
+    #[error("{0}")]
+    Invalid(String),
+    /// A primitive refers past the end of an attribute array.
+    #[error("line {line}: {what} index {index} out of range ({available} available)")]
+    IndexOutOfRange {
+        /// `"vertex"`, `"normal"` or `"texcoord"`.
+        what: &'static str,
+        /// The offending index.
+        index: u32,
+        /// Number of elements available.
+        available: usize,
+        /// Line of the primitive.
         line: u32,
     },
     /// An element has the wrong number of values.
