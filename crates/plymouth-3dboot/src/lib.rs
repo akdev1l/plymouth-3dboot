@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! CPU rasterization of animated 3D models.
 //!
-//! The core crate is pure Rust: it has no platform dependencies, performs no
-//! I/O of its own and produces identical output on native and WebAssembly
-//! targets.
+//! The core crate is pure Rust: it has no platform dependencies and produces
+//! identical output on native and WebAssembly targets. It performs no I/O of
+//! its own, except reading files through [`io::FsResolver`] when a caller
+//! chooses to use it.
 
 #![forbid(unsafe_code)]
 
