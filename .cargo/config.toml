@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[target.wasm32-unknown-emscripten]
+# Test and example binaries run under the node.js shipped with emsdk.
+runner = "node"
+rustflags = [
+    # Scenes and framebuffers can exceed the default 16 MiB initial heap.
+    "-Clink-arg=-sALLOW_MEMORY_GROWTH=1",
+    # rustc 1.98 still passes -sWASM_BIGINT, which emsdk 6 reports as
+    # deprecated on every link. Silence it until rustc drops the flag
+    # (tracked in docs/toolchain.md).
+    "-Clink-arg=-Wno-deprecated",
+]
+
+# Test binaries additionally need direct host filesystem access (fixtures,
+# golden images). That is added only for test runs, through
+# `just test-wasm`, because NODERAWFS cannot work in a browser:
+#   --config 'target.wasm32-unknown-emscripten.rustflags=["-Clink-arg=-sNODERAWFS=1"]'
+# Cargo appends array values given with --config to the list above.
