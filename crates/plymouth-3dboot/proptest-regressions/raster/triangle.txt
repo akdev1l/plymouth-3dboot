@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2dc726912c49d8f37222d21117c6a6260367751514a15e8db79927006f133feb # shrinks to (_, quad) = (Vec2(15.5, 8.0), [Vec2(18.5, 8.0), Vec2(12.5, 10.5), Vec2(13.25, 2.5), Vec2(16.5, 1.0)])
+cc c0234aac56c56589955460ae11524de66a5a2cff03a92a9eb4887286271f9540 # shrinks to (center, rim) = (Vec2(8.0, 15.75), [Vec2(12.0, 15.75), Vec2(4.0, 16.75), Vec2(4.5, 11.5)])
+cc 9ca76eb5c5c88cafd04134adefda89458b7a45750945632b7cffbd05106b0421 # shrinks to (center, rim) = (Vec2(8.0, 18.0), [Vec2(5.75, 13.5), Vec2(14.25, 19.25), Vec2(3.5, 21.75)])
