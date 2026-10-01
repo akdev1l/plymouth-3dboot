@@ -49,6 +49,11 @@ doc:
 smoke-sdl:
     SDL_VIDEODRIVER=dummy cargo run --locked -p plymouth-3dboot-sdl --example sdl_smoke
 
+# Run the native viewer (headless in the container: add `--frames N`;
+# for a window, run it on the host with SDL3 installed).
+viewer *args:
+    cargo run --locked -p plymouth-3dboot-viewer -- "$@"
+
 # Licence, advisory, ban and source policy (deny.toml).
 deny:
     cargo deny --locked check

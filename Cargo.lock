@@ -192,6 +192,7 @@ dependencies = [
 name = "plymouth-3dboot-viewer"
 version = "0.1.0"
 dependencies = [
+ "libm",
  "plymouth-3dboot",
  "plymouth-3dboot-sdl",
 ]

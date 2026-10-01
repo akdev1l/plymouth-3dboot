@@ -30,6 +30,24 @@ scripts/dev.sh just --list   # all recipes
 scripts/dev.sh               # interactive shell
 ```
 
+### Viewer
+
+`apps/viewer` shows a model (the embedded N64 logo by default):
+
+```sh
+cargo run -p plymouth-3dboot-viewer -- [MODEL.obj] [--shading unlit|lambert|blinn-phong]
+```
+
+Run it on the host for a window; this needs SDL3 development files, for
+example `dnf install SDL3-devel`. The container has no display, so
+`scripts/dev.sh just viewer --frames 3` only runs it headless. Controls:
+- drag with the left mouse button to orbit;
+- scroll to zoom;
+- Space pauses;
+- `+`/`-` change the speed;
+- R resets the view;
+- Escape or Q quits.
+
 Pinned versions and WebAssembly notes are in [`docs/toolchain.md`](docs/toolchain.md).
 Coordinate, pixel and colour conventions are in [`docs/conventions.md`](docs/conventions.md).
 

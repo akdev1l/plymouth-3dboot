@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 plymouth-3dboot.workspace = true
 plymouth-3dboot-sdl.workspace = true
+libm.workspace = true
 
 [lints]
 workspace = true
