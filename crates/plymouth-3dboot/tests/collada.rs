@@ -314,3 +314,21 @@ fn bad_channels_are_warnings() {
         m.warnings
     );
 }
+
+#[test]
+fn bezier_channels_become_cubic_splines() {
+    let m = anim_fixture("translate_bezier.dae");
+    assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+    // Ease-in-out with flat tangents: x(u) = 3 (3u^2 - 2u^3) on each half.
+    for (t, x) in [
+        (0.0, 0.0),
+        (0.25, 0.46875),
+        (0.5, 1.5),
+        (1.0, 3.0),
+        (1.5, 1.5),
+        (1.75, 0.46875),
+    ] {
+        let p = posed(&m, "easer", t, Vec3::ZERO);
+        assert!((p.x - x).abs() < 2e-5, "t = {t}: {} vs {x}", p.x);
+    }
+}

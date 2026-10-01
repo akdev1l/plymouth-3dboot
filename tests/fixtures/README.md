@@ -34,3 +34,4 @@ animation importer:
 | `rotate_y.dae` | `rotate.ANGLE` channel, LINEAR: one turn about +Y over 4 s |
 | `matrix_step.dae` | whole-`matrix` channel (row-major `float4x4`), STEP |
 | `translate_x.dae` | `translate.X` member and whole-vector channels, nested `<animation>` |
+| `translate_bezier.dae` | BEZIER `translate.X` ease-in-out (control points at one third), 0 → 3 → 0 over 2 s |

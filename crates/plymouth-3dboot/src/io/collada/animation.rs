@@ -58,9 +58,12 @@ struct Sampler {
     values: Vec<f32>,
     stride: usize,
     interpolation: Interpolation,
+    /// For Bezier/Hermite: per key and component, the *value* coordinate of
+    /// the incoming and outgoing control points (`stride` per key).
+    controls: Option<(Vec<f32>, Vec<f32>)>,
 }
 
-/// Reads an accessor's raw values and stride.
+/// Reads an accessor's raw values, count and stride.
 fn read_accessor(doc: &Document<'_>, uri: &str) -> Result<(Vec<f32>, usize, usize), ColladaError> {
     let source = doc.by_uri(uri)?;
     let accessor = require(doc, require(doc, source, "technique_common")?, "accessor")?;
@@ -77,7 +80,10 @@ fn read_accessor(doc: &Document<'_>, uri: &str) -> Result<(Vec<f32>, usize, usiz
         parse("stride", 1).max(1),
         parse("offset", 0),
     );
-    let needed = offset + count * stride;
+    let needed = count
+        .checked_mul(stride)
+        .and_then(|n| n.checked_add(offset))
+        .unwrap_or(usize::MAX);
     if needed > values.len() {
         return Err(ColladaError::Count {
             expected: needed,
@@ -99,6 +105,34 @@ fn interpolation_names(doc: &Document<'_>, uri: &str) -> Result<Vec<String>, Col
         .collect())
 }
 
+/// Reads a tangent source as control-point values: COLLADA 1.4.1 writes
+/// (time, value) pairs per component (`2 × stride` per key); value-only
+/// tangents (`stride` per key) are accepted too.
+fn read_controls(
+    doc: &Document<'_>,
+    uri: &str,
+    keys: usize,
+    stride: usize,
+) -> Result<Option<Vec<f32>>, ColladaError> {
+    let (raw, count, tangent_stride) = read_accessor(doc, uri)?;
+    if count != keys {
+        return Ok(None);
+    }
+    Ok(if tangent_stride == 2 * stride {
+        Some(
+            raw.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|[_, value]| *value)
+                .collect(),
+        )
+    } else if tangent_stride == stride {
+        Some(raw)
+    } else {
+        None
+    })
+}
+
 fn parse_sampler(
     doc: &Document<'_>,
     sampler: XmlNode<'_, '_>,
@@ -109,10 +143,11 @@ fn parse_sampler(
             .find(|i| i.attribute("semantic") == Some(semantic))
             .and_then(|i| i.attribute("source"))
     };
+    let line = doc.line(sampler);
     let missing = |what: &str| ColladaError::Missing {
         element: format!("{what} input"),
         parent: "sampler".into(),
-        line: doc.line(sampler),
+        line,
     };
     let (times, count, _) = read_accessor(doc, input("INPUT").ok_or_else(|| missing("INPUT"))?)?;
     let (values, out_count, stride) =
@@ -121,28 +156,50 @@ fn parse_sampler(
         return Err(ColladaError::Count {
             expected: count,
             actual: out_count,
-            line: doc.line(sampler),
+            line,
         });
     }
     let names = match input("INTERPOLATION") {
         Some(uri) => interpolation_names(doc, uri)?,
         None => Vec::new(),
     };
+    let mut controls = None;
     let interpolation = match names.first().map(String::as_str) {
         Some("STEP") => Interpolation::Step,
         None | Some("LINEAR") => Interpolation::Linear,
+        Some(curve @ ("BEZIER" | "HERMITE")) => {
+            let tangents = match (input("IN_TANGENT"), input("OUT_TANGENT")) {
+                (Some(i), Some(o)) => {
+                    read_controls(doc, i, count, stride)?.zip(read_controls(doc, o, count, stride)?)
+                }
+                _ => None,
+            };
+            match tangents {
+                Some(c) => {
+                    if curve == "HERMITE" {
+                        warnings.push(format!("line {line}: HERMITE tangents are interpreted like BEZIER control points"));
+                    }
+                    controls = Some(c);
+                    Interpolation::CubicSpline
+                }
+                None => {
+                    warnings.push(format!(
+                        "line {line}: {curve} without usable tangents is approximated as LINEAR"
+                    ));
+                    Interpolation::Linear
+                }
+            }
+        }
         Some(other) => {
             warnings.push(format!(
-                "line {}: {other} interpolation is approximated as LINEAR",
-                doc.line(sampler)
+                "line {line}: {other} interpolation is approximated as LINEAR"
             ));
             Interpolation::Linear
         }
     };
     if names.iter().any(|n| *n != names[0]) {
         warnings.push(format!(
-            "line {}: mixed interpolation per key; using {interpolation:?} throughout",
-            doc.line(sampler)
+            "line {line}: mixed interpolation per key; using {interpolation:?} throughout"
         ));
     }
     Ok(Sampler {
@@ -150,7 +207,48 @@ fn parse_sampler(
         values,
         stride,
         interpolation,
+        controls,
     })
+}
+
+impl Sampler {
+    /// Component `c` of every key, as track values: plain values, or for
+    /// cubic splines `[in_tangent, value, out_tangent]` per key, with the
+    /// Bezier control points converted to Hermite tangents (value units
+    /// per second): `out = 3 (c_out - v_i) / dt_i`, `in = 3 (v_i - c_in) / dt_{i-1}`.
+    /// This is exact for control points at one third of each segment, as
+    /// COLLADA exporters write them.
+    fn column(&self, c: usize) -> Vec<f32> {
+        let n = self.times.len();
+        let v = |k: usize| self.values[k * self.stride + c];
+        let Some((cin, cout)) = &self.controls else {
+            return (0..n).map(v).collect();
+        };
+        let mut out = Vec::with_capacity(n * 3);
+        for k in 0..n {
+            let tan_in = if k > 0 {
+                3.0 * (v(k) - cin[k * self.stride + c]) / (self.times[k] - self.times[k - 1])
+            } else {
+                0.0
+            };
+            let tan_out = if k + 1 < n {
+                3.0 * (cout[k * self.stride + c] - v(k)) / (self.times[k + 1] - self.times[k])
+            } else {
+                0.0
+            };
+            out.extend([tan_in, v(k), tan_out]);
+        }
+        out
+    }
+
+    /// Number of track values per key (3 for cubic splines).
+    fn per_key(&self) -> usize {
+        if self.interpolation == Interpolation::CubicSpline {
+            3
+        } else {
+            1
+        }
+    }
 }
 
 /// The element (`rotate`, `translate`, `scale`, `matrix`, ...) with `sid`
@@ -164,46 +262,41 @@ fn element_kind<'a>(doc: &'a Document<'_>, node: &str, sid: &str) -> Option<&'a 
 
 /// Builds the element track for a sampler and target.
 fn element_track(kind: &str, member: Option<Member>, s: &Sampler) -> Result<ElementTrack, String> {
-    let keys = s.times.len();
     let track_err = |e: crate::anim::TrackError| e.to_string();
-    let column = |c: usize| {
-        (0..keys)
-            .map(|k| s.values[k * s.stride + c])
-            .collect::<Vec<f32>>()
-    };
+    let times = || s.times.clone();
+    // Track values are per key (and per tangent for cubic splines), so a
+    // multi-component value is assembled from the columns entry by entry.
+    let entries = s.times.len() * s.per_key();
+    let columns = |n: usize| (0..n).map(|c| s.column(c)).collect::<Vec<_>>();
     match (kind, member, s.stride) {
-        ("rotate", Some(Member::Angle), 1) | ("rotate", Some(Member::Component(3)), 1) => {
-            let radians = column(0).into_iter().map(f32::to_radians).collect();
-            Track::new(s.times.clone(), radians, s.interpolation)
-                .map(ElementTrack::Angle)
-                .map_err(track_err)
-        }
-        ("rotate", None, 4) => {
-            // Whole axis-angle values: only the angle is animated.
-            let radians = column(3).into_iter().map(f32::to_radians).collect();
-            Track::new(s.times.clone(), radians, s.interpolation)
+        ("rotate", Some(Member::Angle | Member::Component(3)), 1) | ("rotate", None, 4) => {
+            let c = if s.stride == 4 { 3 } else { 0 };
+            let radians = s.column(c).into_iter().map(f32::to_radians).collect();
+            Track::new(times(), radians, s.interpolation)
                 .map(ElementTrack::Angle)
                 .map_err(track_err)
         }
         ("translate" | "scale", Some(Member::Component(index)), 1) if index < 3 => {
-            Track::new(s.times.clone(), column(0), s.interpolation)
+            Track::new(times(), s.column(0), s.interpolation)
                 .map(|track| ElementTrack::Component { index, track })
                 .map_err(track_err)
         }
         ("translate" | "scale", None, 3) => {
-            let v = (0..keys)
-                .map(|k| Vec3::new(s.values[k * 3], s.values[k * 3 + 1], s.values[k * 3 + 2]))
+            let c = columns(3);
+            let v = (0..entries)
+                .map(|e| Vec3::new(c[0][e], c[1][e], c[2][e]))
                 .collect();
-            Track::new(s.times.clone(), v, s.interpolation)
+            Track::new(times(), v, s.interpolation)
                 .map(ElementTrack::Vector)
                 .map_err(track_err)
         }
         ("matrix", None, 16) => {
+            let c = columns(16);
             // COLLADA matrices are row-major.
-            let m = (0..keys)
-                .map(|k| Mat4::from_cols_slice(&s.values[k * 16..][..16]).transpose())
+            let m = (0..entries)
+                .map(|e| Mat4::from_cols_array(&std::array::from_fn(|i| c[i][e])).transpose())
                 .collect();
-            Track::new(s.times.clone(), m, s.interpolation)
+            Track::new(times(), m, s.interpolation)
                 .map(ElementTrack::Matrix)
                 .map_err(track_err)
         }
@@ -342,6 +435,7 @@ mod tests {
             values,
             stride,
             interpolation: Interpolation::Linear,
+            controls: None,
         };
         assert!(matches!(
             element_track("rotate", Some(Member::Angle), &s(vec![0.0, 180.0], 1)),
