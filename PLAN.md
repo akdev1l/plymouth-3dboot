@@ -110,8 +110,8 @@ Golden comparisons allow a small tolerance across targets.
 - CCW front faces; culling is configurable.
 - Pixel centres at `(x+0.5, y+0.5)`, **top-left fill rule**, origin at the top left.
 - Colour is linear `f32` internally and encoded to sRGB `u8`. The framebuffer
-  byte order is `R,G,B,A`, presented through SDL as `SDL_PIXELFORMAT_ABGR8888`
-  on little-endian hosts. Byte order is tested in Phase 6.
+  byte order is `R,G,B,A`, presented through SDL as `SDL_PIXELFORMAT_RGBA32`
+  (byte order on any endianness). Byte order is tested in Phase 6.
 
 ## 2. Phases & steps
 
