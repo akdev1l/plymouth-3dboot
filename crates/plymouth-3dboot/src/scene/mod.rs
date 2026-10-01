@@ -3,6 +3,7 @@
 
 pub mod material;
 pub mod mesh;
+pub mod primitives;
 
 pub use material::{Material, MaterialId};
 pub use mesh::{Mesh, MeshError, Submesh};

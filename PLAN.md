@@ -290,6 +290,11 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
 - Validation errors are returned as `Err`, never as panics.
 - *Commit:* `feat(scene): add mesh and material types`
 
+**4.1b Procedural primitives**
+- `scene::primitives::{cube, uv_sphere}` with outward-facing CCW triangles, unit normals and UVs. Used by tests, goldens and examples.
+- *Tests:* outward winding of every triangle; normals are unit length and radial (sphere) or match the faces (cube).
+- *Commit:* `feat(scene): add cube and sphere primitives`
+
 **4.2 Normal generation**
 - Flat normals, and smooth normals by angle or smoothing group.
 - *Tests:* cube and sphere checks.
