@@ -11,14 +11,15 @@ use plymouth_3dboot_testutil::{Tolerance, golden};
 /// Transforms positions and passes per-vertex colours through.
 struct VertexColor {
     mvp: Mat4,
+    vertices: Vec<(Vec3, LinearRgba)>,
 }
 
 impl Shader for VertexColor {
-    type Vertex = (Vec3, LinearRgba);
     type Varyings = LinearRgba;
 
-    fn vertex(&self, v: &Self::Vertex) -> ClipVertex<LinearRgba> {
-        ClipVertex::project(&self.mvp, v.0, v.1)
+    fn vertex(&self, i: u32) -> ClipVertex<LinearRgba> {
+        let (position, color) = self.vertices[i as usize];
+        ClipVertex::project(&self.mvp, position, color)
     }
 
     fn fragment(&self, f: &FragmentInput<LinearRgba>) -> Option<LinearRgba> {
@@ -77,12 +78,19 @@ fn render_cube(cull: CullMode) -> Framebuffer {
     let model = Mat4::from_rotation_y(0.3);
     let shader = VertexColor {
         mvp: proj * view * model,
+        vertices,
     };
     let mut target = Framebuffer::new(SIZE, SIZE, Rgba8::new(20, 20, 28, 255)).unwrap();
     let mut state = RenderState::new(Viewport::new(SIZE, SIZE));
     state.cull = cull;
     let stats = Renderer::new()
-        .draw_indexed(&mut target, &state, &shader, &vertices, &indices)
+        .draw_indexed(
+            &mut target,
+            &state,
+            &shader,
+            shader.vertices.len(),
+            &indices,
+        )
         .unwrap();
     if cull == CullMode::Back {
         assert_eq!(

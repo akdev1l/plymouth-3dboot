@@ -10,16 +10,17 @@ use crate::target::{Framebuffer, MAX_DIMENSION};
 /// Programmable vertex and fragment stages.
 ///
 /// Implementations are plain Rust types. The renderer is generic over
-/// them, so shading compiles to direct calls.
+/// them, so shading compiles to direct calls. Shaders own (or borrow) their
+/// vertex data and *pull* vertices by index, so meshes with separate
+/// attribute arrays need no interleaved copy.
 pub trait Shader {
-    /// Input vertex type.
-    type Vertex;
     /// Attributes passed from the vertex to the fragment stage, interpolated
     /// perspective-correctly.
     type Varyings: Interpolate;
 
-    /// Transforms one vertex into clip space.
-    fn vertex(&self, vertex: &Self::Vertex) -> ClipVertex<Self::Varyings>;
+    /// Transforms vertex `index` (always `< vertex_count` of the draw call)
+    /// into clip space.
+    fn vertex(&self, index: u32) -> ClipVertex<Self::Varyings>;
 
     /// Shades one fragment, returning its linear colour, or `None` to discard
     /// it (leaving colour and depth untouched).
@@ -124,7 +125,8 @@ impl Renderer {
         Self::default()
     }
 
-    /// Draws indexed triangles (`indices` in groups of three) into `target`.
+    /// Draws indexed triangles (`indices` in groups of three, referring to
+    /// vertices `0..vertex_count` of `shader`) into `target`.
     ///
     /// Depth is tested with depth before shading ("early Z"). Fragment
     /// colours replace the target colour (no blending).
@@ -138,7 +140,7 @@ impl Renderer {
         target: &mut Framebuffer,
         state: &RenderState,
         shader: &S,
-        vertices: &[S::Vertex],
+        vertex_count: usize,
         indices: &[u32],
     ) -> Result<DrawStats, DrawError> {
         let vp = state.viewport;
@@ -151,15 +153,20 @@ impl Renderer {
         if !indices.len().is_multiple_of(3) {
             return Err(DrawError::IndexCount(indices.len()));
         }
-        if let Some(&index) = indices.iter().find(|&&i| i as usize >= vertices.len()) {
+        if let Some(&index) = indices.iter().find(|&&i| i as usize >= vertex_count) {
             return Err(DrawError::IndexOutOfRange {
                 index,
-                vertex_count: vertices.len(),
+                vertex_count,
             });
         }
+        let Ok(vertex_count) = u32::try_from(vertex_count) else {
+            // Every index is below vertex_count, so the draw is empty.
+            return Ok(DrawStats::default());
+        };
 
+        // Vertex shading, once per vertex.
         let clip: Vec<ClipVertex<S::Varyings>> =
-            vertices.iter().map(|v| shader.vertex(v)).collect();
+            (0..vertex_count).map(|i| shader.vertex(i)).collect();
         let scissor = Rect {
             x0: vp.x,
             y0: vp.y,
@@ -234,17 +241,14 @@ mod tests {
     use crate::math::Vec4;
 
     /// Positions are already in clip space; varyings carry a colour.
-    struct Passthrough;
+    struct Passthrough(Vec<(Vec4, LinearRgba)>);
 
     impl Shader for Passthrough {
-        type Vertex = (Vec4, LinearRgba);
         type Varyings = LinearRgba;
 
-        fn vertex(&self, v: &Self::Vertex) -> ClipVertex<LinearRgba> {
-            ClipVertex {
-                position: v.0,
-                varyings: v.1,
-            }
+        fn vertex(&self, i: u32) -> ClipVertex<LinearRgba> {
+            let (position, varyings) = self.0[i as usize];
+            ClipVertex { position, varyings }
         }
 
         fn fragment(&self, f: &FragmentInput<LinearRgba>) -> Option<LinearRgba> {
@@ -253,15 +257,14 @@ mod tests {
     }
 
     /// Discards fragments in odd columns.
-    struct Stripes;
+    struct Stripes(Vec<Vec4>);
 
     impl Shader for Stripes {
-        type Vertex = Vec4;
         type Varyings = ();
 
-        fn vertex(&self, v: &Vec4) -> ClipVertex<()> {
+        fn vertex(&self, i: u32) -> ClipVertex<()> {
             ClipVertex {
-                position: *v,
+                position: self.0[i as usize],
                 varyings: (),
             }
         }
@@ -272,30 +275,41 @@ mod tests {
     }
 
     const RED: LinearRgba = LinearRgba::rgb(1.0, 0.0, 0.0);
+    const QUAD: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
-    fn full_screen_quad(z: f32, color: LinearRgba) -> (Vec<(Vec4, LinearRgba)>, Vec<u32>) {
-        let v = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
-            .map(|(x, y)| (Vec4::new(x, y, z, 1.0), color));
-        (v.to_vec(), vec![0, 1, 2, 0, 2, 3])
+    fn quad_corners() -> [Vec4; 4] {
+        [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(x, y)| Vec4::new(x, y, 0.0, 1.0))
+    }
+
+    fn red_quad() -> Passthrough {
+        Passthrough(quad_corners().iter().map(|&p| (p, RED)).collect())
     }
 
     fn fb(w: u32, h: u32) -> Framebuffer {
         Framebuffer::new(w, h, Rgba8::BLACK).unwrap()
     }
 
+    fn draw<S: Shader>(
+        target: &mut Framebuffer,
+        state: &RenderState,
+        shader: &S,
+        n: usize,
+        indices: &[u32],
+    ) -> Result<DrawStats, DrawError> {
+        Renderer::new().draw_indexed(target, state, shader, n, indices)
+    }
+
     #[test]
     fn full_screen_quad_covers_every_pixel_once() {
         let mut target = fb(8, 6);
-        let (v, i) = full_screen_quad(0.0, RED);
-        let stats = Renderer::new()
-            .draw_indexed(
-                &mut target,
-                &RenderState::new(Viewport::new(8, 6)),
-                &Passthrough,
-                &v,
-                &i,
-            )
-            .unwrap();
+        let stats = draw(
+            &mut target,
+            &RenderState::new(Viewport::new(8, 6)),
+            &red_quad(),
+            4,
+            &QUAD,
+        )
+        .unwrap();
         assert!(
             target
                 .color
@@ -326,16 +340,13 @@ mod tests {
     #[test]
     fn viewport_limits_drawing() {
         let mut target = fb(8, 8);
-        let (v, i) = full_screen_quad(0.0, RED);
         let state = RenderState::new(Viewport {
             x: 2,
             y: 3,
             width: 4,
             height: 2,
         });
-        let stats = Renderer::new()
-            .draw_indexed(&mut target, &state, &Passthrough, &v, &i)
-            .unwrap();
+        let stats = draw(&mut target, &state, &red_quad(), 4, &QUAD).unwrap();
         assert_eq!(stats.fragments_written, 8);
         for y in 0..8 {
             for x in 0..8 {
@@ -352,24 +363,20 @@ mod tests {
     #[test]
     fn viewport_larger_than_framebuffer_is_clipped() {
         let mut target = fb(4, 4);
-        let (v, i) = full_screen_quad(0.0, RED);
-        let stats = Renderer::new()
-            .draw_indexed(
-                &mut target,
-                &RenderState::new(Viewport::new(100, 100)),
-                &Passthrough,
-                &v,
-                &i,
-            )
-            .unwrap();
+        let stats = draw(
+            &mut target,
+            &RenderState::new(Viewport::new(100, 100)),
+            &red_quad(),
+            4,
+            &QUAD,
+        )
+        .unwrap();
         assert_eq!(stats.fragments_written, 16);
     }
 
     #[test]
     fn oversized_viewports_are_rejected() {
         let mut target = fb(16, 16);
-        let (v, i) = full_screen_quad(0.0, RED);
-        let mut r = Renderer::new();
         for vp in [
             Viewport::new(30_000, 30_000),
             Viewport {
@@ -380,64 +387,53 @@ mod tests {
             },
         ] {
             assert_eq!(
-                r.draw_indexed(&mut target, &RenderState::new(vp), &Passthrough, &v, &i),
+                draw(&mut target, &RenderState::new(vp), &red_quad(), 4, &QUAD),
                 Err(DrawError::Viewport(vp))
             );
         }
         // The largest allowed viewport still draws its on-screen part.
         let max = Viewport::new(MAX_DIMENSION, MAX_DIMENSION);
-        let big =
-            [(-1.0, 1.0), (3.9, 1.0), (-1.0, -1.0)].map(|(x, y)| (Vec4::new(x, y, 0.0, 1.0), RED));
-        let stats = r
-            .draw_indexed(
-                &mut target,
-                &RenderState::new(max),
-                &Passthrough,
-                &big,
-                &[0, 1, 2],
-            )
-            .unwrap();
+        let big = Passthrough(
+            [(-1.0, 1.0), (3.9, 1.0), (-1.0, -1.0)]
+                .map(|(x, y)| (Vec4::new(x, y, 0.0, 1.0), RED))
+                .to_vec(),
+        );
+        let stats = draw(&mut target, &RenderState::new(max), &big, 3, &[0, 1, 2]).unwrap();
         assert_eq!(stats.fragments_written, 256, "{stats:?}");
     }
 
     #[test]
     fn degenerate_triangles_are_counted() {
         let mut target = fb(4, 4);
-        let v = [
+        let line = Stripes(vec![
             Vec4::new(0.0, 0.0, 0.0, 1.0),
             Vec4::new(0.5, 0.5, 0.0, 1.0),
             Vec4::new(1.0, 1.0, 0.0, 1.0),
-        ];
-        let stats = Renderer::new()
-            .draw_indexed(
-                &mut target,
-                &RenderState::new(Viewport::new(4, 4)),
-                &Stripes,
-                &v,
-                &[0, 1, 2],
-            )
-            .unwrap();
+        ]);
+        let stats = draw(
+            &mut target,
+            &RenderState::new(Viewport::new(4, 4)),
+            &line,
+            3,
+            &[0, 1, 2],
+        )
+        .unwrap();
         assert_eq!((stats.degenerate, stats.rasterized), (1, 0));
     }
 
     #[test]
     fn culling_counts_and_rejects_back_faces() {
         let mut target = fb(4, 4);
-        let (v, _) = full_screen_quad(0.0, RED);
         let clockwise = [0, 2, 1, 0, 3, 2];
         let mut state = RenderState::new(Viewport::new(4, 4));
         state.cull = CullMode::Back;
-        let stats = Renderer::new()
-            .draw_indexed(&mut target, &state, &Passthrough, &v, &clockwise)
-            .unwrap();
+        let stats = draw(&mut target, &state, &red_quad(), 4, &clockwise).unwrap();
         assert_eq!(
             (stats.culled, stats.rasterized, stats.fragments_written),
             (2, 0, 0)
         );
         state.cull = CullMode::Front;
-        let stats = Renderer::new()
-            .draw_indexed(&mut target, &state, &Passthrough, &v, &clockwise)
-            .unwrap();
+        let stats = draw(&mut target, &state, &red_quad(), 4, &clockwise).unwrap();
         assert_eq!((stats.culled, stats.fragments_written), (0, 16));
     }
 
@@ -445,11 +441,10 @@ mod tests {
     fn front_facing_flag_matches_winding() {
         struct FacingColor;
         impl Shader for FacingColor {
-            type Vertex = Vec4;
             type Varyings = ();
-            fn vertex(&self, v: &Vec4) -> ClipVertex<()> {
+            fn vertex(&self, i: u32) -> ClipVertex<()> {
                 ClipVertex {
-                    position: *v,
+                    position: quad_corners()[i as usize],
                     varyings: (),
                 }
             }
@@ -461,35 +456,26 @@ mod tests {
                 })
             }
         }
-        let v = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
-            .map(|(x, y)| Vec4::new(x, y, 0.0, 1.0));
         let mut target = fb(4, 4);
         let state = RenderState::new(Viewport::new(4, 4));
         // Counter-clockwise in NDC: front-facing.
-        Renderer::new()
-            .draw_indexed(&mut target, &state, &FacingColor, &v, &[0, 1, 2])
-            .unwrap();
+        draw(&mut target, &state, &FacingColor, 4, &[0, 1, 2]).unwrap();
         assert_eq!(target.color.get(3, 1), Some(Rgba8::new(0, 255, 0, 255)));
-        Renderer::new()
-            .draw_indexed(&mut target, &state, &FacingColor, &v, &[0, 3, 2])
-            .unwrap();
+        draw(&mut target, &state, &FacingColor, 4, &[0, 3, 2]).unwrap();
         assert_eq!(target.color.get(0, 2), Some(Rgba8::new(255, 0, 0, 255)));
     }
 
     #[test]
     fn discarded_fragments_leave_colour_and_depth() {
         let mut target = fb(4, 2);
-        let v = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
-            .map(|(x, y)| Vec4::new(x, y, 0.0, 1.0));
-        let stats = Renderer::new()
-            .draw_indexed(
-                &mut target,
-                &RenderState::new(Viewport::new(4, 2)),
-                &Stripes,
-                &v,
-                &[0, 1, 2, 0, 2, 3],
-            )
-            .unwrap();
+        let stats = draw(
+            &mut target,
+            &RenderState::new(Viewport::new(4, 2)),
+            &Stripes(quad_corners().to_vec()),
+            4,
+            &QUAD,
+        )
+        .unwrap();
         assert_eq!((stats.fragments_shaded, stats.fragments_written), (8, 4));
         assert_eq!(target.color.get(1, 0), Some(Rgba8::BLACK));
         assert_eq!(target.depth.get(1, 0), Some(1.0));
@@ -499,15 +485,13 @@ mod tests {
     #[test]
     fn invalid_indices_are_rejected_before_drawing() {
         let mut target = fb(4, 4);
-        let (v, _) = full_screen_quad(0.0, RED);
         let state = RenderState::new(Viewport::new(4, 4));
-        let mut r = Renderer::new();
         assert_eq!(
-            r.draw_indexed(&mut target, &state, &Passthrough, &v, &[0, 1]),
+            draw(&mut target, &state, &red_quad(), 4, &[0, 1]),
             Err(DrawError::IndexCount(2))
         );
         assert_eq!(
-            r.draw_indexed(&mut target, &state, &Passthrough, &v, &[0, 1, 2, 0, 2, 4]),
+            draw(&mut target, &state, &red_quad(), 4, &[0, 1, 2, 0, 2, 4]),
             Err(DrawError::IndexOutOfRange {
                 index: 4,
                 vertex_count: 4
@@ -524,36 +508,32 @@ mod tests {
         // A quad whose right edge is 4x farther (w = 4): the attribute at the
         // horizontal screen centre is much closer to the left value.
         struct U;
-        impl Shader for U {
-            type Vertex = (Vec4, f32);
-            type Varyings = f32;
-            fn vertex(&self, v: &(Vec4, f32)) -> ClipVertex<f32> {
-                ClipVertex {
-                    position: v.0,
-                    varyings: v.1,
-                }
-            }
-            fn fragment(&self, f: &FragmentInput<f32>) -> Option<LinearRgba> {
-                Some(LinearRgba::rgb(f.varyings, 0.0, 0.0))
-            }
-        }
-        let v = [
+        const VERTS: [(Vec4, f32); 4] = [
             (Vec4::new(-1.0, -1.0, 0.0, 1.0), 0.0),
             (Vec4::new(4.0, -4.0, 0.0, 4.0), 1.0),
             (Vec4::new(4.0, 4.0, 0.0, 4.0), 1.0),
             (Vec4::new(-1.0, 1.0, 0.0, 1.0), 0.0),
         ];
+        impl Shader for U {
+            type Varyings = f32;
+            fn vertex(&self, i: u32) -> ClipVertex<f32> {
+                let (position, varyings) = VERTS[i as usize];
+                ClipVertex { position, varyings }
+            }
+            fn fragment(&self, f: &FragmentInput<f32>) -> Option<LinearRgba> {
+                Some(LinearRgba::rgb(f.varyings, 0.0, 0.0))
+            }
+        }
         let mut target = Framebuffer::new(64, 1, Rgba8::BLACK).unwrap();
-        Renderer::new()
-            .draw_indexed(
-                &mut target,
-                &RenderState::new(Viewport::new(64, 1)),
-                &U,
-                &v,
-                &[0, 1, 2, 0, 2, 3],
-            )
-            .unwrap();
-        // Screen-space midpoint: u = (0.5/1) / (0.5/1 + 0.5/4) * 0 + ... = 0.2.
+        draw(
+            &mut target,
+            &RenderState::new(Viewport::new(64, 1)),
+            &U,
+            4,
+            &QUAD,
+        )
+        .unwrap();
+        // Screen-space midpoint: u = (0.5/4) / (0.5/1 + 0.5/4) = 0.2.
         let mid = target.color.get(32, 0).unwrap().to_linear().r;
         assert!((mid - 0.2).abs() < 0.02, "u at screen centre = {mid}");
     }
