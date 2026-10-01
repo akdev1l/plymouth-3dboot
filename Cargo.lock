@@ -178,6 +178,7 @@ dependencies = [
  "plymouth-3dboot",
  "sdl3",
  "sdl3-sys",
+ "thiserror",
 ]
 
 [[package]]

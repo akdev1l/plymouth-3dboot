@@ -10,13 +10,19 @@ publish.workspace = true
 
 [dependencies]
 plymouth-3dboot.workspace = true
-sdl3 = { version = "0.20.0", default-features = false }
+sdl3 = { version = "0.20.0", default-features = false, features = ["unsafe_textures"] }
 sdl3-sys = { version = "0.7.1", default-features = false }
+thiserror.workspace = true
 
 # Natively, link the system SDL3 found through pkg-config. On Emscripten,
 # sdl3-sys links `-lSDL3`, which emcc resolves to its SDL3 port.
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
-sdl3 = { version = "0.20.0", default-features = false, features = ["use-pkg-config"] }
+sdl3 = { version = "0.20.0", default-features = false, features = ["unsafe_textures", "use-pkg-config"] }
+
+[[test]]
+name = "headless"
+# SDL must be initialized on the main thread: run without libtest's threads.
+harness = false
 
 [lints]
 workspace = true
