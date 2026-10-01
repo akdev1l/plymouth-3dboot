@@ -35,7 +35,7 @@ scripts/dev.sh               # interactive shell
 `apps/viewer` shows a model (the embedded N64 logo by default):
 
 ```sh
-cargo run -p plymouth-3dboot-viewer -- [MODEL.obj] [--shading unlit|lambert|blinn-phong]
+cargo run -p plymouth-3dboot-viewer -- [MODEL.obj|MODEL.dae] [--shading unlit|lambert|blinn-phong]
 ```
 
 Run it on the host for a window; this needs SDL3 development files, for

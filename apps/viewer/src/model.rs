@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use plymouth_3dboot::io::collada::{ColladaOptions, load_collada};
 use plymouth_3dboot::io::obj::{ObjOptions, load_obj};
 use plymouth_3dboot::io::{FsResolver, MemResolver};
 use plymouth_3dboot::scene::Scene;
@@ -24,7 +25,7 @@ pub fn embedded_n64() -> Result<Scene, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Loads a model file, choosing the format by extension (`.obj`).
+/// Loads a model file, choosing the format by extension (`.obj` or `.dae`).
 ///
 /// # Errors
 ///
@@ -47,8 +48,19 @@ pub fn load_file(path: &Path) -> Result<Scene, String> {
             }
             Ok(model.scene)
         }
+        Some("dae") => {
+            let text =
+                std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let dir = path.parent().unwrap_or_else(|| Path::new("."));
+            let model = load_collada(&text, &FsResolver::new(dir), &ColladaOptions::default())
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            for w in &model.warnings {
+                eprintln!("warning: {w}");
+            }
+            Ok(model.scene)
+        }
         _ => Err(format!(
-            "{}: unsupported model format (expected .obj)",
+            "{}: unsupported model format (expected .obj or .dae)",
             path.display()
         )),
     }

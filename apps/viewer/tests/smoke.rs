@@ -4,13 +4,18 @@
 #[cfg(not(target_os = "emscripten"))]
 #[test]
 fn viewer_runs_headless_and_exits() {
-    let fixture = concat!(
+    let obj = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/fixtures/n64_logo/n64_logo.obj"
     );
+    let dae = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/n64_logo/n64_logo.dae"
+    );
     for args in [
         vec!["--frames", "3"],
-        vec![fixture, "--shading", "blinn-phong", "--frames", "2"],
+        vec![obj, "--shading", "blinn-phong", "--frames", "2"],
+        vec![dae, "--shading", "lambert", "--frames", "2"],
     ] {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_plymouth-3dboot-viewer"))
             .args(&args)

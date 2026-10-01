@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Interactive viewer for `plymouth-3dboot` models.
 //!
-//! Usage: `plymouth-3dboot-viewer [MODEL] [--shading unlit|lambert|blinn-phong]
+//! Usage: `plymouth-3dboot-viewer [MODEL.obj|MODEL.dae] [--shading unlit|lambert|blinn-phong]
 //! [--frames N] [--max-resolution PX]`
 //!
 //! Without a model the embedded N64 logo is shown. Drag with the left mouse
