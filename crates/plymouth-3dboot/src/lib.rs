@@ -10,6 +10,7 @@
 pub mod color;
 pub mod io;
 pub mod math;
+pub mod raster;
 pub mod target;
 
 /// Returns the version of this crate (`major.minor.patch`).
