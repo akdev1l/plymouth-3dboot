@@ -5,12 +5,14 @@
 //! using one of the [`ShadingModel`]s. The individual shaders are public, so
 //! they can also be used directly with [`Renderer::draw_indexed`].
 
+mod lambert;
 mod unlit;
 
+pub use lambert::LambertShader;
 pub use unlit::UnlitShader;
 
 use crate::color::LinearRgba;
-use crate::math::{Mat4, Vec3};
+use crate::math::{Mat3, Mat4, Vec3};
 use crate::pipeline::{DrawError, DrawStats, RenderState, Renderer};
 use crate::raster::CullMode;
 use crate::scene::{Camera, Material, Mesh};
@@ -54,6 +56,8 @@ pub enum ShadingModel {
     /// The material's base colour, ignoring lights ("fully self-illuminated").
     #[default]
     Unlit,
+    /// Diffuse lighting ([`LambertShader`]); needs vertex normals.
+    Lambert,
 }
 
 /// Errors from [`draw_mesh`].
@@ -87,12 +91,27 @@ pub struct DrawParams<'a> {
 struct Transforms {
     /// Model-view-projection.
     mvp: Mat4,
+    /// Model-to-world.
+    world: Mat4,
 }
 
 impl Transforms {
     fn new(camera: &Camera, aspect: f32, world: Mat4) -> Self {
         Self {
             mvp: camera.view_projection(aspect) * world,
+            world,
+        }
+    }
+
+    /// The matrix transforming normals of `world`: the inverse transpose of
+    /// its upper 3×3 (a singular matrix falls back to the 3×3 itself).
+    fn normal_matrix(world: Mat4) -> Mat3 {
+        let m = Mat3::from_mat4(world);
+        let det = m.determinant();
+        if det.abs() > f32::EPSILON {
+            m.inverse().transpose()
+        } else {
+            m
         }
     }
 }
@@ -139,6 +158,17 @@ pub fn draw_mesh(
         let stats = match params.model {
             ShadingModel::Unlit => {
                 let shader = UnlitShader::new(transforms.mvp, mesh.positions(), material);
+                renderer.draw_indexed(target, &sub_state, &shader, n, indices)?
+            }
+            ShadingModel::Lambert => {
+                let shader = LambertShader::new(
+                    transforms.mvp,
+                    transforms.world,
+                    mesh,
+                    material,
+                    params.lighting,
+                )
+                .ok_or(ShadeError::MissingNormals)?;
                 renderer.draw_indexed(target, &sub_state, &shader, n, indices)?
             }
         };
@@ -232,6 +262,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(target.color.get(8, 8), Some(Rgba8::WHITE));
+    }
+
+    #[test]
+    fn lit_models_require_normals() {
+        let bare = Mesh::new(
+            uv_sphere(1.0, 8, 4).positions().to_vec(),
+            uv_sphere(1.0, 8, 4).indices().to_vec(),
+        )
+        .unwrap();
+        let mut target = Framebuffer::new(16, 16, Rgba8::BLACK).unwrap();
+        let params = DrawParams {
+            camera: &camera(),
+            lighting: &Lighting::default(),
+            model: ShadingModel::Lambert,
+            materials: &[],
+        };
+        let err = draw_mesh(
+            &mut Renderer::new(),
+            &mut target,
+            &RenderState::new(Viewport::new(16, 16)),
+            &params,
+            &bare,
+            Mat4::IDENTITY,
+        );
+        assert_eq!(err, Err(ShadeError::MissingNormals));
+        assert!(
+            target.color.pixels().iter().all(|&p| p == Rgba8::BLACK),
+            "nothing drawn"
+        );
     }
 
     #[test]

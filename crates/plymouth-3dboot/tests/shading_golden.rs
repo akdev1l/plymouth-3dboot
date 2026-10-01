@@ -63,3 +63,10 @@ fn unlit_sphere() {
     );
     golden!().assert("shading_unlit_sphere", &image, Tolerance::EXACT);
 }
+
+#[test]
+fn lambert_sphere() {
+    let material = Material::with_color("orange", Rgba8::new(240, 130, 20, 255).to_linear());
+    let image = render_sphere(ShadingModel::Lambert, &material).color;
+    golden!().assert("shading_lambert_sphere", &image, Tolerance::EXACT);
+}
