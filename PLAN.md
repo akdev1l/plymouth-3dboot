@@ -209,7 +209,7 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
 - *Commit:* `feat(target): add colour and depth buffers`
 
 **1.4 PNG I/O**
-- Encode to and decode from `Vec<u8>`, plus a path helper (native only, `cfg`-gated).
+- Encode to and decode from bytes (`io::png::{encode, decode}`). The core does no file I/O, so callers read and write files themselves.
 - *Tests:* a 2×2 pattern round-trips.
 - *Commit:* `feat(io): encode framebuffer to PNG`
 

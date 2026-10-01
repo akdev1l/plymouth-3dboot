@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod color;
+pub mod io;
 pub mod math;
 pub mod target;
 
