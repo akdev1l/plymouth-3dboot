@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The scene graph: nodes with local transforms, meshes and materials.
 
-use super::{Material, Mesh};
+use super::{Camera, Material, Mesh, Projection};
 use crate::math::{Aabb, Mat4, Quat, Vec3};
 
 /// Index of a node in a [`Scene`].
@@ -128,6 +128,8 @@ pub struct Node {
     pub transform: LocalTransform,
     /// Mesh drawn at this node, if any.
     pub mesh: Option<MeshId>,
+    /// A camera placed at this node (looking down its local −Z), if any.
+    pub camera: Option<Projection>,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
 }
@@ -147,6 +149,13 @@ impl Node {
     #[must_use]
     pub fn with_mesh(mut self, mesh: MeshId) -> Self {
         self.mesh = Some(mesh);
+        self
+    }
+
+    /// Places a camera at this node.
+    #[must_use]
+    pub fn with_camera(mut self, projection: Projection) -> Self {
+        self.camera = Some(projection);
         self
     }
 
@@ -323,6 +332,35 @@ impl Scene {
             world.push(m);
         }
         world
+    }
+
+    /// The camera at `node` for the given world matrices (e.g. of an
+    /// animated pose), or `None` if the node has no camera.
+    ///
+    /// Scale in the node's world matrix is removed, so a scaled parent
+    /// (such as a unit conversion) moves the camera but does not distort
+    /// the view.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `node` or `world` does not match the scene.
+    #[must_use]
+    pub fn camera(&self, node: NodeId, world: &[Mat4]) -> Option<Camera> {
+        let projection = self.nodes[node.0].camera?;
+        let (_, rotation, translation) = world[node.0].to_scale_rotation_translation();
+        Some(Camera {
+            projection,
+            world: Mat4::from_rotation_translation(rotation.normalize(), translation),
+        })
+    }
+
+    /// Ids of the nodes that carry cameras, in node order.
+    pub fn cameras(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.camera.is_some())
+            .map(|(i, _)| NodeId(i))
     }
 
     /// World-space bounds of all mesh instances, given world matrices.
@@ -523,6 +561,55 @@ mod tests {
         assert_eq!(w.nodes()[2].parent(), Some(NodeId(1)));
         assert_eq!(&w.world_matrices()[1..], &s.world_matrices()[..]);
         assert_eq!(w.bounds(), s.bounds());
+    }
+
+    #[test]
+    fn orbiting_camera_node_keeps_its_distance_and_aim() {
+        use crate::anim::{Clip, Pose};
+        let mut s = Scene::new();
+        let pivot = s
+            .add_node(
+                None,
+                Node::new(
+                    "pivot",
+                    LocalTransform::Matrix(Mat4::from_scale(Vec3::splat(3.0))),
+                ),
+            )
+            .unwrap();
+        let projection = Projection::Perspective {
+            fov_y: 1.0,
+            z_near: 0.1,
+            z_far: 100.0,
+        };
+        let cam = s
+            .add_node(
+                Some(pivot),
+                Node::new(
+                    "cam",
+                    trs(Vec3::new(0.0, 1.0, 5.0), Quat::IDENTITY, Vec3::ONE),
+                )
+                .with_camera(projection),
+            )
+            .unwrap();
+        assert_eq!(s.cameras().collect::<Vec<_>>(), vec![cam]);
+        assert!(s.camera(pivot, &s.world_matrices()).is_none());
+        let clip = Clip::turntable(pivot, Vec3::Y, 10.0);
+        for i in 0..10 {
+            let world = Pose::evaluate(&s, &clip, i as f32).world(&s);
+            let camera = s.camera(cam, &world).unwrap();
+            let p = camera.position();
+            // The pivot's scale moves the camera to radius 15, height 3...
+            assert!(
+                (Vec3::new(p.x, 0.0, p.z).length() - 15.0).abs() < 1e-3 && (p.y - 3.0).abs() < 1e-4,
+                "{p}"
+            );
+            // ...but the view itself is not scaled: the axis below the camera
+            // projects to the horizontal centre line of the screen.
+            let target = camera
+                .view_projection(1.0)
+                .project_point3(Vec3::new(0.0, 3.0, 0.0));
+            assert!(target.x.abs() < 1e-4 && target.y.abs() < 1e-4, "{target}");
+        }
     }
 
     #[test]
