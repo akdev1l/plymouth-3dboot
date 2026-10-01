@@ -10,6 +10,13 @@ publish.workspace = true
 
 [dependencies]
 plymouth-3dboot.workspace = true
+sdl3 = { version = "0.20.0", default-features = false }
+sdl3-sys = { version = "0.7.1", default-features = false }
+
+# Natively, link the system SDL3 found through pkg-config. On Emscripten,
+# sdl3-sys links `-lSDL3`, which emcc resolves to its SDL3 port.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+sdl3 = { version = "0.20.0", default-features = false, features = ["use-pkg-config"] }
 
 [lints]
 workspace = true

@@ -161,7 +161,7 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
 - *Tests:* `cargo test -p plymouth-3dboot --target wasm32-unknown-emscripten` runs the smoke test under node.
 - *Commit:* `build: configure wasm32-unknown-emscripten target and node runner`
 
-**0.6 Toolchain spike: SDL on both targets** (throwaway code in `apps/viewer`)
+**0.6 Toolchain spike: SDL on both targets** (kept as the `sdl_smoke` example in the SDL crate)
 - Open an SDL window and fill it with a solid colour from a CPU buffer, in two variants:
   - native: run headless with the dummy driver
   - wasm: `-sUSE_SDL=3` with `emscripten_set_main_loop`
