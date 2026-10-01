@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use plymouth_3dboot::color::Rgba8;
 use plymouth_3dboot::io::FsResolver;
+use plymouth_3dboot::io::collada::{ColladaOptions, load_collada};
 use plymouth_3dboot::io::obj::{ObjOptions, load_obj};
 use plymouth_3dboot::math::{Vec3, Viewport};
 use plymouth_3dboot::pipeline::{RenderState, Renderer};
@@ -35,6 +36,17 @@ fn load_obj_scene() -> Scene {
         &src,
         &FsResolver::new(fixture_dir()),
         &ObjOptions::default(),
+    )
+    .unwrap()
+    .scene
+}
+
+fn load_dae_scene() -> Scene {
+    let text = std::fs::read_to_string(format!("{}/n64_logo.dae", fixture_dir())).unwrap();
+    load_collada(
+        &text,
+        &FsResolver::new(fixture_dir()),
+        &ColladaOptions::default(),
     )
     .unwrap()
     .scene
@@ -95,6 +107,27 @@ fn obj_unlit() {
         "exactly the four Readme colours plus background"
     );
     golden!().assert("n64_obj_unlit", &image.color, Tolerance::EXACT);
+}
+
+/// Intersection over union of the non-background pixels of two renders.
+fn silhouette_iou(a: &Framebuffer, b: &Framebuffer) -> f64 {
+    let (mut inter, mut union) = (0u32, 0u32);
+    for (p, q) in a.color.pixels().iter().zip(b.color.pixels()) {
+        let (x, y) = (*p != BACKGROUND, *q != BACKGROUND);
+        inter += u32::from(x && y);
+        union += u32::from(x || y);
+    }
+    f64::from(inter) / f64::from(union.max(1))
+}
+
+#[test]
+fn dae_unlit_matches_obj() {
+    let dae = render(&load_dae_scene(), VIEW_DIRECTION, ShadingModel::Unlit);
+    let obj = render(&load_obj_scene(), VIEW_DIRECTION, ShadingModel::Unlit);
+    assert_eq!(palette(&dae), palette(&obj), "same colours");
+    let iou = silhouette_iou(&dae, &obj);
+    assert!(iou >= 0.95, "silhouette IoU {iou}");
+    golden!().assert("n64_dae_unlit", &dae.color, Tolerance::EXACT);
 }
 
 #[test]
