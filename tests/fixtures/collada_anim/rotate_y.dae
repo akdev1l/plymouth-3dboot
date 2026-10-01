@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Synthetic test fixture: one turn about +Y over 4 s (rotate.ANGLE, LINEAR) -->
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit meter="1" name="meter"/><up_axis>Y_UP</up_axis></asset>
+  <library_animations>
+    <animation id="spin">
+      <source id="spin-sampler-input">
+        <float_array id="spin-sampler-input-array" count="5">0 1 2 3 4</float_array>
+        <technique_common><accessor source="#spin-sampler-input-array" count="5" stride="1"><param name="TIME" type="float"/></accessor></technique_common>
+      </source>
+      <source id="spin-sampler-output">
+        <float_array id="spin-sampler-output-array" count="5">0 90 180 270 360</float_array>
+        <technique_common><accessor source="#spin-sampler-output-array" count="5" stride="1"><param name="ANGLE" type="float"/></accessor></technique_common>
+      </source>
+      <source id="spin-sampler-interpolation">
+        <Name_array id="spin-sampler-interpolation-array" count="5">LINEAR LINEAR LINEAR LINEAR LINEAR</Name_array>
+        <technique_common><accessor source="#spin-sampler-interpolation-array" count="5" stride="1"><param name="INTERPOLATION" type="name"/></accessor></technique_common>
+      </source>
+      <sampler id="spin-sampler">
+        <input semantic="INPUT" source="#spin-sampler-input"/>
+        <input semantic="OUTPUT" source="#spin-sampler-output"/>
+        <input semantic="INTERPOLATION" source="#spin-sampler-interpolation"/>
+      </sampler>
+      <channel source="#spin-sampler" target="spinner/rotateY.ANGLE"/>
+    </animation>
+  </library_animations>
+  <library_geometries>
+    <geometry id="tri" name="tri">
+      <mesh>
+        <source id="tri-pos">
+          <float_array id="tri-pos-array" count="9">0 0 0 1 0 0 0 1 0</float_array>
+          <technique_common><accessor source="#tri-pos-array" count="3" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common>
+        </source>
+        <vertices id="tri-vtx"><input semantic="POSITION" source="#tri-pos"/></vertices>
+        <triangles count="1"><input semantic="VERTEX" source="#tri-vtx" offset="0"/><p>0 1 2</p></triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="scene">
+      <node id="spinner" name="spinner">
+        <translate sid="translate">0 0 0</translate>
+        <rotate sid="rotateY">0 1 0 0</rotate>
+        <instance_geometry url="#tri"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#scene"/></scene>
+</COLLADA>

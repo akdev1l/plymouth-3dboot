@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Synthetic test fixture: translate.X member and whole-vector channels in nested animations -->
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit meter="1" name="meter"/><up_axis>Y_UP</up_axis></asset>
+  <library_animations>
+    <animation id="outer">
+      <animation id="slide">
+      <source id="slide-sampler-input">
+        <float_array id="slide-sampler-input-array" count="2">0 1</float_array>
+        <technique_common><accessor source="#slide-sampler-input-array" count="2" stride="1"><param name="TIME" type="float"/></accessor></technique_common>
+      </source>
+      <source id="slide-sampler-output">
+        <float_array id="slide-sampler-output-array" count="2">0 3</float_array>
+        <technique_common><accessor source="#slide-sampler-output-array" count="2" stride="1"><param name="X" type="float"/></accessor></technique_common>
+      </source>
+      <source id="slide-sampler-interpolation">
+        <Name_array id="slide-sampler-interpolation-array" count="2">LINEAR LINEAR</Name_array>
+        <technique_common><accessor source="#slide-sampler-interpolation-array" count="2" stride="1"><param name="INTERPOLATION" type="name"/></accessor></technique_common>
+      </source>
+      <sampler id="slide-sampler">
+        <input semantic="INPUT" source="#slide-sampler-input"/>
+        <input semantic="OUTPUT" source="#slide-sampler-output"/>
+        <input semantic="INTERPOLATION" source="#slide-sampler-interpolation"/>
+      </sampler>
+        <channel source="#slide-sampler" target="slider/location.X"/>
+      </animation>
+      <animation id="lift">
+      <source id="lift-sampler-input">
+        <float_array id="lift-sampler-input-array" count="2">0 2</float_array>
+        <technique_common><accessor source="#lift-sampler-input-array" count="2" stride="1"><param name="TIME" type="float"/></accessor></technique_common>
+      </source>
+      <source id="lift-sampler-output">
+        <float_array id="lift-sampler-output-array" count="6">0 0 0 0 4 0</float_array>
+        <technique_common><accessor source="#lift-sampler-output-array" count="2" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common>
+      </source>
+      <source id="lift-sampler-interpolation">
+        <Name_array id="lift-sampler-interpolation-array" count="2">LINEAR LINEAR</Name_array>
+        <technique_common><accessor source="#lift-sampler-interpolation-array" count="2" stride="1"><param name="INTERPOLATION" type="name"/></accessor></technique_common>
+      </source>
+      <sampler id="lift-sampler">
+        <input semantic="INPUT" source="#lift-sampler-input"/>
+        <input semantic="OUTPUT" source="#lift-sampler-output"/>
+        <input semantic="INTERPOLATION" source="#lift-sampler-interpolation"/>
+      </sampler>
+        <channel source="#lift-sampler" target="child/offset"/>
+      </animation>
+    </animation>
+  </library_animations>
+  <library_geometries>
+    <geometry id="tri" name="tri">
+      <mesh>
+        <source id="tri-pos">
+          <float_array id="tri-pos-array" count="9">0 0 0 1 0 0 0 1 0</float_array>
+          <technique_common><accessor source="#tri-pos-array" count="3" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common>
+        </source>
+        <vertices id="tri-vtx"><input semantic="POSITION" source="#tri-pos"/></vertices>
+        <triangles count="1"><input semantic="VERTEX" source="#tri-vtx" offset="0"/><p>0 1 2</p></triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="scene">
+      <node id="slider" name="slider">
+        <translate sid="location">0 0 0</translate>
+        <node id="child" name="child">
+          <translate sid="offset">0 0 0</translate>
+          <instance_geometry url="#tri"/>
+        </node>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#scene"/></scene>
+</COLLADA>

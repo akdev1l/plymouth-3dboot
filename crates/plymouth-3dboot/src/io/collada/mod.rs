@@ -4,11 +4,13 @@
 //! A documented subset of COLLADA 1.4/1.5 is supported; unsupported
 //! elements are skipped with a warning rather than failing the load.
 
+mod animation;
 mod geometry;
 mod material;
 mod scene;
 mod xml;
 
+use crate::anim::Clip;
 use crate::io::ResourceResolver;
 use crate::scene::Scene;
 
@@ -36,6 +38,9 @@ pub struct ColladaModel {
     /// The scene. Its single root node (named `collada`) holds the up-axis
     /// and unit conversion; the document's nodes are below it.
     pub scene: Scene,
+    /// Animation clips (one clip with every channel when the document
+    /// defines animations but no `<library_animation_clips>`).
+    pub clips: Vec<Clip>,
     /// Problems that did not prevent loading (unsupported features).
     pub warnings: Vec<String>,
 }
@@ -46,8 +51,11 @@ pub struct ColladaModel {
 /// common-profile materials (colours; textures are ignored), node
 /// hierarchies with `translate`/`rotate`/`scale`/`matrix`/`lookat`
 /// transforms (kept as transform stacks), `instance_node`, and material
-/// binding. Cameras, lights, controllers (skinning) and textures produce
-/// warnings. `resolver` is reserved for external resources (textures).
+/// binding, and transform animations (`<library_animations>` channels
+/// targeting `rotate` angles, `translate`/`scale` values or components, and
+/// `matrix` elements). Cameras, lights, controllers (skinning) and textures
+/// produce warnings. `resolver` is reserved for external resources
+/// (textures).
 ///
 /// # Errors
 ///
@@ -58,8 +66,18 @@ pub fn load_collada(
     options: &ColladaOptions,
 ) -> Result<ColladaModel, ColladaError> {
     let doc = xml::Document::parse(text)?;
-    let (scene, warnings) = scene::build_scene(&doc, options)?;
-    Ok(ColladaModel { scene, warnings })
+    let (scene, nodes, mut warnings) = scene::build_scene(&doc, options)?;
+    let channels = animation::parse_library(&doc, &nodes, &mut warnings)?;
+    let clips = if channels.is_empty() {
+        Vec::new()
+    } else {
+        vec![Clip::new("default", channels)]
+    };
+    Ok(ColladaModel {
+        scene,
+        clips,
+        warnings,
+    })
 }
 
 /// Loading a COLLADA document failed.

@@ -116,6 +116,7 @@ fn transform_stack(
 struct Builder<'d, 'input> {
     doc: &'d Document<'input>,
     scene: Scene,
+    nodes: NodeMap,
     geometries: HashMap<String, Option<Geometry>>,
     materials: HashMap<String, usize>,
     default_material: Option<usize>,
@@ -213,6 +214,9 @@ impl Builder<'_, '_> {
             .scene
             .add_node(parent, Node::new(name.clone(), LocalTransform::Stack(ops)))
             .map_err(|e| ColladaError::Invalid(e.to_string()))?;
+        if let Some(xml_id) = node.attribute("id") {
+            self.nodes.entry(xml_id.to_owned()).or_default().push(id);
+        }
         for e in node.children().filter(XmlNode::is_element) {
             match e.tag_name().name() {
                 "instance_geometry" => {
@@ -247,13 +251,18 @@ impl Builder<'_, '_> {
 
 /// Builds the scene from the document's `<scene>` (or its first visual
 /// scene), wrapped in a root node converting units and up axis.
+/// Scene nodes created for each XML `<node id>` (an `<instance_node>` can
+/// instantiate the same XML node several times).
+pub(crate) type NodeMap = HashMap<String, Vec<NodeId>>;
+
 pub(crate) fn build_scene(
     doc: &Document<'_>,
     options: &ColladaOptions,
-) -> Result<(Scene, Vec<String>), ColladaError> {
+) -> Result<(Scene, NodeMap, Vec<String>), ColladaError> {
     let mut b = Builder {
         doc,
         scene: Scene::new(),
+        nodes: HashMap::new(),
         geometries: HashMap::new(),
         materials: HashMap::new(),
         default_material: None,
@@ -293,5 +302,5 @@ pub(crate) fn build_scene(
         }
         None => b.warnings.push("document has no visual scene".into()),
     }
-    Ok((b.scene, b.warnings))
+    Ok((b.scene, b.nodes, b.warnings))
 }

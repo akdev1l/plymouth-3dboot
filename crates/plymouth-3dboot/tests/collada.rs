@@ -193,3 +193,124 @@ fn n64_logo_dae_matches_obj_geometry() {
     // Upright: tallest along +Y from the ground (y >= 0) like the OBJ.
     assert!(a.min.y.abs() < 2e-3);
 }
+
+// --- Animation (Phase 9) ---------------------------------------------------
+
+use plymouth_3dboot::anim::Pose;
+
+fn anim_fixture(name: &str) -> plymouth_3dboot::io::collada::ColladaModel {
+    let path = format!(
+        "{}/../../tests/fixtures/collada_anim/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    load(
+        &std::fs::read_to_string(path).unwrap(),
+        ColladaOptions::default(),
+    )
+}
+
+/// World position of the first mesh vertex at local `p` under node `name`.
+fn posed(model: &plymouth_3dboot::io::collada::ColladaModel, name: &str, t: f32, p: Vec3) -> Vec3 {
+    let node = model.scene.find_node(name).unwrap();
+    let world = Pose::evaluate(&model.scene, &model.clips[0], t).world(&model.scene);
+    world[node.0].transform_point3(p)
+}
+
+#[test]
+fn n64_logo_has_no_animation() {
+    let m = load(&n64_dae(), ColladaOptions::default());
+    assert!(m.clips.is_empty());
+}
+
+#[test]
+fn rotate_angle_channel() {
+    let m = anim_fixture("rotate_y.dae");
+    assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+    assert_eq!(m.clips.len(), 1);
+    assert_eq!(m.clips[0].duration(), 4.0);
+    for (t, expected) in [
+        (0.0, Vec3::X),
+        (1.0, Vec3::NEG_Z),
+        (2.0, Vec3::NEG_X),
+        (3.0, Vec3::Z),
+        (0.5, Vec3::new(0.70710677, 0.0, -0.70710677)),
+    ] {
+        let p = posed(&m, "spinner", t, Vec3::X);
+        assert!(p.abs_diff_eq(expected, 1e-5), "t = {t}: {p}");
+    }
+}
+
+#[test]
+fn matrix_channel_with_step_interpolation() {
+    let m = anim_fixture("matrix_step.dae");
+    assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+    for (t, x) in [(0.0, 0.0), (0.99, 0.0), (1.0, 2.0), (1.5, 2.0), (2.0, 0.0)] {
+        assert!(
+            posed(&m, "hopper", t, Vec3::ZERO).abs_diff_eq(Vec3::new(x, 0.0, 0.0), 1e-6),
+            "t = {t}"
+        );
+    }
+}
+
+#[test]
+fn component_and_vector_channels_in_nested_animations() {
+    let m = anim_fixture("translate_x.dae");
+    assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+    assert_eq!(m.clips[0].duration(), 2.0);
+    assert!(posed(&m, "slider", 0.5, Vec3::ZERO).abs_diff_eq(Vec3::new(1.5, 0.0, 0.0), 1e-6));
+    // The child inherits the slide and adds its own lift.
+    assert!(posed(&m, "child", 1.0, Vec3::ZERO).abs_diff_eq(Vec3::new(3.0, 2.0, 0.0), 1e-6));
+}
+
+#[test]
+fn bad_channels_are_warnings() {
+    let text = std::fs::read_to_string(format!(
+        "{}/../../tests/fixtures/collada_anim/rotate_y.dae",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    for (from, to, expect) in [
+        (
+            "spinner/rotateY.ANGLE",
+            "ghost/rotateY.ANGLE",
+            "not in the scene",
+        ),
+        (
+            "spinner/rotateY.ANGLE",
+            "spinner/nosuch.ANGLE",
+            "no transform with sid",
+        ),
+        (
+            "spinner/rotateY.ANGLE",
+            "spinner/translate.ANGLE",
+            "unsupported target",
+        ),
+        (
+            "spinner/rotateY.ANGLE",
+            "spinner/a/b",
+            "unsupported channel target",
+        ),
+    ] {
+        let m = load(&text.replace(from, to), ColladaOptions::default());
+        assert!(m.clips.is_empty());
+        assert!(
+            m.warnings.iter().any(|w| w.contains(expect)),
+            "{to}: {:?}",
+            m.warnings
+        );
+    }
+    // Interpolations other than STEP/LINEAR are approximated (until BEZIER support).
+    let m = load(
+        &text.replace(
+            "LINEAR LINEAR LINEAR LINEAR LINEAR",
+            "CARDINAL CARDINAL CARDINAL CARDINAL CARDINAL",
+        ),
+        ColladaOptions::default(),
+    );
+    assert_eq!(m.clips.len(), 1);
+    assert!(
+        m.warnings.iter().any(|w| w.contains("approximated")),
+        "{:?}",
+        m.warnings
+    );
+}

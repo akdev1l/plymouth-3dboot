@@ -22,3 +22,15 @@ Known properties, asserted by tests as the loaders land:
 - OBJ: 48 vertices, 52 faces (44 quads + 8 triangles, so 96 triangles), 4 materials, no normals or UVs, Y-up, CRLF.
 - DAE: 96 triangles in 4 groups (30/50/8/8), 152 normals, `Z_UP`, unit = inch, and **no animation**.
 - Reference colours (sRGB, from the Readme): green (6, 147, 48), blue (2, 34, 169), red (255, 24, 19), yellow (255, 192, 1). Displayed unlit ("self illumination full").
+
+## `collada_anim/`
+
+Small synthetic COLLADA 1.4.1 documents (GPL-3.0-or-later, written for this
+project). Each animates a single triangle to exercise one feature of the
+animation importer:
+
+| File | Feature |
+|---|---|
+| `rotate_y.dae` | `rotate.ANGLE` channel, LINEAR: one turn about +Y over 4 s |
+| `matrix_step.dae` | whole-`matrix` channel (row-major `float4x4`), STEP |
+| `translate_x.dae` | `translate.X` member and whole-vector channels, nested `<animation>` |
