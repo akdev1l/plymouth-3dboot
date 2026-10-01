@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# cargo-deny policy: `just deny`. Every dependency must be compatible with
+# GPL-3.0-or-later and come from crates.io.
+
+[graph]
+all-features = true
+
+[advisories]
+# Known vulnerabilities, unmaintained or yanked crates fail the check.
+yanked = "deny"
+unmaintained = "workspace"
+
+[licenses]
+confidence-threshold = 0.9
+# The allow list is a policy, not an inventory.
+unused-allowed-license = "allow"
+# Permissive licences compatible with GPL-3.0-or-later.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[licenses.private]
+# Our own (unpublished) workspace crates are GPL-3.0-or-later.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

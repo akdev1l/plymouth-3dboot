@@ -11,7 +11,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl deny
 
 # Format all code.
 fmt:
@@ -46,6 +46,10 @@ doc:
 # Run the SDL smoke example headless.
 smoke-sdl:
     SDL_VIDEODRIVER=dummy cargo run --locked -p plymouth-3dboot-sdl --example sdl_smoke
+
+# Licence, advisory, ban and source policy (deny.toml).
+deny:
+    cargo deny --locked check
 
 # Re-run tests, regenerating golden images (review the diffs before committing).
 golden-update:
