@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "plymouth-3dboot-viewer"
+description = "Interactive SDL3 viewer for plymouth-3dboot (native and web)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+plymouth-3dboot.workspace = true
+plymouth-3dboot-sdl.workspace = true
+
+[lints]
+workspace = true

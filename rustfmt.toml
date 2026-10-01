@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+style_edition = "2024"
+newline_style = "Unix"

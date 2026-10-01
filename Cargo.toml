@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[workspace]
+resolver = "3"
+members = [
+    "crates/plymouth-3dboot",
+    "crates/plymouth-3dboot-sdl",
+    "apps/viewer",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace.dependencies]
+plymouth-3dboot = { path = "crates/plymouth-3dboot" }
+plymouth-3dboot-sdl = { path = "crates/plymouth-3dboot-sdl" }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "deny"
