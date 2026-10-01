@@ -7,8 +7,10 @@
 
 #[cfg(target_os = "emscripten")]
 mod emscripten;
+pub mod input;
 pub mod main_loop;
 pub mod presenter;
 
-pub use main_loop::{App, Control, InputEvent, RunOptions, Runner, run};
+pub use input::{InputEvent, map_event};
+pub use main_loop::{App, Control, RunOptions, Runner, run};
 pub use presenter::{Presenter, SdlError, WindowConfig};

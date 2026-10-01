@@ -7,15 +7,8 @@
 
 use plymouth_3dboot::target::ColorBuffer;
 
+use crate::input::{InputEvent, map_event};
 use crate::presenter::{Presenter, SdlError};
-
-/// Input delivered to [`App::update`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[non_exhaustive]
-pub enum InputEvent {
-    /// The user asked to close the application.
-    Quit,
-}
 
 /// Whether the loop should keep running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -120,14 +113,6 @@ impl<A: App> Runner<A> {
     /// Consumes the runner, returning the application.
     pub fn into_app(self) -> A {
         self.app
-    }
-}
-
-/// SDL events mapped to [`InputEvent`]s (unmapped events are dropped).
-fn map_event(event: &sdl3::event::Event) -> Option<InputEvent> {
-    match event {
-        sdl3::event::Event::Quit { .. } => Some(InputEvent::Quit),
-        _ => None,
     }
 }
 
