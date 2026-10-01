@@ -90,8 +90,31 @@ pub struct Fragment {
     pub y: u32,
     /// Edge-function values at the pixel centre, indexed by the *opposite*
     /// vertex in the caller's vertex order. They are non-negative and sum
-    /// to [`TriangleSetup::double_area`].
+    /// to [`Fragment::double_area`].
     pub edge_values: [i64; 3],
+    /// Twice the triangle's area in subpixel units squared (> 0).
+    pub double_area: i64,
+}
+
+impl Fragment {
+    /// Screen-space barycentric weights of the pixel centre, in the caller's
+    /// vertex order. Each is in `[0, 1]` and together they sum to 1 (within
+    /// rounding).
+    #[must_use]
+    pub fn barycentric(&self) -> [f32; 3] {
+        // Edge values are below 2^52, so the f64 conversions are exact.
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+        let w = self
+            .edge_values
+            .map(|e| (e as f64 / self.double_area as f64) as f32);
+        w
+    }
+
+    /// Interpolates per-vertex `values` linearly in screen space.
+    #[must_use]
+    pub fn interpolate<T: super::Interpolate>(&self, values: [T; 3]) -> T {
+        T::interpolate(values, self.barycentric())
+    }
 }
 
 /// A triangle prepared for rasterization: snapped vertices, edge functions
@@ -218,7 +241,12 @@ impl TriangleSetup {
                     for (i, &value) in w.iter().enumerate() {
                         edge_values[self.order[i]] = value;
                     }
-                    f(Fragment { x, y, edge_values });
+                    f(Fragment {
+                        x,
+                        y,
+                        edge_values,
+                        double_area: self.double_area,
+                    });
                 }
                 for i in 0..3 {
                     w[i] += step_x[i];
@@ -418,6 +446,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn barycentric_is_one_hot_at_a_covered_vertex() {
+        // Vertex 0 sits exactly on the centre of pixel (0, 0), on the top and
+        // left edges, so that pixel is covered with weights (1, 0, 0).
+        let tri = [v(0.5, 0.5), v(10.5, 0.5), v(0.5, 10.5)];
+        let mut found = None;
+        TriangleSetup::new(tri)
+            .unwrap()
+            .for_each_pixel(SCREEN, |f| {
+                if (f.x, f.y) == (0, 0) {
+                    found = Some(f.barycentric());
+                }
+            });
+        assert_eq!(found, Some([1.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn barycentric_is_a_third_at_the_centroid() {
+        // Centroid (2.5, 2.5) is the centre of pixel (2, 2).
+        let tri = [v(0.5, 0.5), v(6.5, 0.5), v(0.5, 6.5)];
+        let mut found = None;
+        TriangleSetup::new(tri)
+            .unwrap()
+            .for_each_pixel(SCREEN, |f| {
+                if (f.x, f.y) == (2, 2) {
+                    found = Some(f.barycentric());
+                }
+            });
+        let w = found.expect("centroid pixel covered");
+        assert!(w.iter().all(|&x| (x - 1.0 / 3.0).abs() < 1e-6), "{w:?}");
+    }
+
     /// Points on a quarter-pixel grid, so that edges often pass exactly
     /// through pixel centres and the fill rule is exercised.
     fn grid_point() -> impl Strategy<Value = Vec2> {
@@ -531,6 +591,23 @@ mod tests {
                         prop_assert!(counts.contains_key(&(x, y)), "gap at ({x}, {y})");
                     }
                 }
+            }
+        }
+
+        /// Weights are in [0, 1], sum to 1, and reproduce the pixel centre when
+        /// interpolating the (snapped) vertex positions.
+        #[test]
+        fn barycentric_weights_are_affine(a in grid_point(), b in grid_point(), c in grid_point()) {
+            let tri = [a, b, c];
+            if let Some(t) = TriangleSetup::new(tri) {
+                t.for_each_pixel(SCREEN, |f| {
+                    let w = f.barycentric();
+                    assert!(w.iter().all(|&x| (0.0..=1.0).contains(&x)), "{w:?}");
+                    assert!((w.iter().sum::<f32>() - 1.0).abs() < 1e-5, "{w:?}");
+                    let p = f.interpolate(tri);
+                    let center = Vec2::new(f.x as f32 + 0.5, f.y as f32 + 0.5);
+                    assert!((p - center).abs().max_element() < 1e-3, "{p} vs {center}");
+                });
             }
         }
 

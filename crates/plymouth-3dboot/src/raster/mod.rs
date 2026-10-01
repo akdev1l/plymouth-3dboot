@@ -9,6 +9,8 @@
 
 pub mod edge;
 pub mod fixed;
+pub mod interp;
 pub mod triangle;
 
+pub use interp::Interpolate;
 pub use triangle::{CullMode, Fragment, Rect, TriangleSetup, Winding};
