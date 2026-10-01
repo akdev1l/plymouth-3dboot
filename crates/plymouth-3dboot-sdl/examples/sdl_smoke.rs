@@ -1,98 +1,66 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Toolchain smoke test: open an SDL3 window and present a CPU-filled
-//! RGBA buffer through a streaming texture.
+//! Toolchain smoke test: open a window and present CPU-rendered frames with
+//! the crate's `Presenter` and frame loop.
 //!
 //! Natively it presents a few frames and exits, so it also works headless
-//! (`SDL_VIDEODRIVER=dummy`). On Emscripten it runs from the browser's main
-//! loop.
+//! (`SDL_VIDEODRIVER=dummy`). On Emscripten it keeps running in the
+//! browser's main loop.
 
-use sdl3::pixels::PixelFormat;
-use sdl3::render::WindowCanvas;
-use sdl3_sys::pixels::SDL_PixelFormat;
+use plymouth_3dboot::color::Rgba8;
+use plymouth_3dboot::target::ColorBuffer;
+use plymouth_3dboot_sdl::{App, Control, InputEvent, Presenter, RunOptions, WindowConfig, run};
 
-const WIDTH: u32 = 64;
-const HEIGHT: u32 = 64;
-#[cfg(not(target_os = "emscripten"))]
-const FRAMES: u32 = 3;
-
-struct State {
-    canvas: WindowCanvas,
-    pixels: Vec<u8>,
-    frame: u32,
+/// Fills the frame with a colour that changes over time.
+struct Pulse {
+    time: f64,
+    frame: ColorBuffer,
 }
 
-impl State {
-    fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let sdl = sdl3::init()?;
-        let video = sdl.video()?;
-        let window = video
-            .window("plymouth-3dboot smoke", WIDTH, HEIGHT)
-            .build()?;
-        let canvas = window.into_canvas();
-        println!("renderer: {}", canvas.renderer_name);
-        Ok(Self {
-            canvas,
-            pixels: vec![0; (WIDTH * HEIGHT * 4) as usize],
-            frame: 0,
-        })
-    }
-
-    /// Renders and presents one frame.
-    fn step(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let shade = u8::try_from(self.frame % 256)?;
-        for px in self.pixels.as_chunks_mut::<4>().0 {
-            *px = [255, shade, 0, 255];
-        }
-        // RGBA32 is byte-order R,G,B,A on every host endianness.
-        let format = PixelFormat::try_from(SDL_PixelFormat::RGBA32)?;
-        let creator = self.canvas.texture_creator();
-        let mut texture = creator.create_texture_streaming(format, WIDTH, HEIGHT)?;
-        texture.update(None, &self.pixels, (WIDTH * 4) as usize)?;
-        self.canvas.copy(&texture, None, None)?;
-        self.canvas.present();
-        self.frame += 1;
-        Ok(())
-    }
-}
-
-#[cfg(not(target_os = "emscripten"))]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut state = State::new()?;
-    while state.frame < FRAMES {
-        state.step()?;
-    }
-    println!("presented {} frames", state.frame);
-    Ok(())
-}
-
-#[cfg(target_os = "emscripten")]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use std::ffi::{c_int, c_void};
-
-    unsafe extern "C" {
-        fn emscripten_set_main_loop_arg(
-            func: extern "C" fn(*mut c_void),
-            arg: *mut c_void,
-            fps: c_int,
-            simulate_infinite_loop: c_int,
-        );
-    }
-
-    extern "C" fn tick(arg: *mut c_void) {
-        // SAFETY: `arg` is the leaked `Box<State>` registered below; the
-        // browser main loop calls this on a single thread, never reentrantly.
-        let state = unsafe { &mut *arg.cast::<State>() };
-        if let Err(err) = state.step() {
-            eprintln!("frame failed: {err}");
+impl App for Pulse {
+    fn update(&mut self, events: &[InputEvent], dt: f64) -> Control {
+        self.time += dt;
+        if events.contains(&InputEvent::Quit) {
+            Control::Quit
+        } else {
+            Control::Continue
         }
     }
 
-    let state = Box::into_raw(Box::new(State::new()?));
-    // SAFETY: `tick` matches the expected callback ABI and `state` stays
-    // valid forever (it is intentionally leaked to the browser main loop).
-    // `simulate_infinite_loop = 0`: `main` returns normally and the runtime
-    // stays alive (EXIT_RUNTIME defaults to off). The alternative throws a
-    // JS exception through Rust frames, which is unsound with wasm exceptions.
-    unsafe { emscripten_set_main_loop_arg(tick, state.cast(), 0, 0) };
+    fn render(&mut self, _size: (u32, u32)) -> &ColorBuffer {
+        // A full red-to-yellow cycle every two seconds.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let shade = ((self.time * 128.0) % 256.0) as u8;
+        self.frame.clear(Rgba8::new(255, shade, 0, 255));
+        &self.frame
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let presenter = Presenter::new(&WindowConfig {
+        title: "plymouth-3dboot smoke".into(),
+        width: 64,
+        height: 64,
+        resizable: false,
+    })?;
+    println!("renderer: {}", presenter.renderer_name());
+    let app = Pulse {
+        time: 0.0,
+        frame: ColorBuffer::new(64, 64, Rgba8::BLACK)?,
+    };
+    let max_frames = if cfg!(target_os = "emscripten") {
+        None
+    } else {
+        Some(3)
+    };
+    if let Some(app) = run(
+        presenter,
+        app,
+        RunOptions {
+            max_frames,
+            ..RunOptions::default()
+        },
+    )? {
+        println!("presented frames for {:.3} s", app.time);
+    }
     Ok(())
 }

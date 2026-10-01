@@ -33,8 +33,7 @@ fn run() {
     use plymouth_3dboot::target::ColorBuffer;
     use plymouth_3dboot_sdl::{Presenter, WindowConfig};
 
-    sdl3::hint::set("SDL_VIDEO_DRIVER", "dummy");
-    sdl3::hint::set("SDL_RENDER_DRIVER", "software");
+    headless_hints();
 
     let config = WindowConfig {
         title: "headless".into(),
@@ -90,6 +89,65 @@ fn run() {
         .show(&ColorBuffer::new(0, 0, Rgba8::BLACK).unwrap())
         .unwrap();
     println!("ok: texture reuse and empty frames");
+    drop(presenter);
+
+    run_loop_headless();
+}
+
+/// Selects the dummy video driver and software renderer. SDL resets hints
+/// when it shuts down, so call this before every initialization.
+#[cfg(not(target_os = "emscripten"))]
+fn headless_hints() {
+    sdl3::hint::set("SDL_VIDEO_DRIVER", "dummy");
+    sdl3::hint::set("SDL_RENDER_DRIVER", "software");
+}
+
+/// The native frame loop runs a real app for a fixed number of frames.
+#[cfg(not(target_os = "emscripten"))]
+fn run_loop_headless() {
+    use plymouth_3dboot::color::Rgba8;
+    use plymouth_3dboot::target::ColorBuffer;
+    use plymouth_3dboot_sdl::{App, Control, InputEvent, Presenter, RunOptions, WindowConfig, run};
+
+    struct Counter {
+        updates: u32,
+        renders: u32,
+        frame: ColorBuffer,
+    }
+    impl App for Counter {
+        fn update(&mut self, _: &[InputEvent], _: f64) -> Control {
+            self.updates += 1;
+            Control::Continue
+        }
+        fn render(&mut self, size: (u32, u32)) -> &ColorBuffer {
+            assert_eq!(size, (16, 16));
+            self.renders += 1;
+            &self.frame
+        }
+    }
+    headless_hints();
+    let presenter = Presenter::new(&WindowConfig {
+        title: "loop".into(),
+        width: 16,
+        height: 16,
+        resizable: false,
+    })
+    .unwrap();
+    let app = Counter {
+        updates: 0,
+        renders: 0,
+        frame: ColorBuffer::new(16, 16, Rgba8::WHITE).unwrap(),
+    };
+    let options = RunOptions {
+        max_frames: Some(5),
+        fps_cap: None,
+        ..RunOptions::default()
+    };
+    let app = run(presenter, app, options)
+        .unwrap()
+        .expect("native run returns the app");
+    assert_eq!((app.updates, app.renders), (5, 5));
+    println!("ok: native loop ran 5 frames and exited");
 }
 
 #[cfg(target_os = "emscripten")]

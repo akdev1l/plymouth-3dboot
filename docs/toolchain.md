@@ -58,7 +58,8 @@ catches this.
 ## SDL smoke test
 
 `crates/plymouth-3dboot-sdl/examples/sdl_smoke.rs` opens a window and presents
-a CPU-filled RGBA buffer through a streaming texture (`SDL_PIXELFORMAT_RGBA32`):
+CPU-filled frames with the crate's `Presenter` (streaming `SDL_PIXELFORMAT_RGBA32`
+texture) and frame loop:
 
 ```sh
 # Native, headless (software renderer)

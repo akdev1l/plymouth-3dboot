@@ -5,6 +5,10 @@
 //! (Emscripten's SDL3 port). Only the SDL 3.2 API is used (see
 //! `docs/toolchain.md`).
 
+#[cfg(target_os = "emscripten")]
+mod emscripten;
+pub mod main_loop;
 pub mod presenter;
 
+pub use main_loop::{App, Control, InputEvent, RunOptions, Runner, run};
 pub use presenter::{Presenter, SdlError, WindowConfig};
