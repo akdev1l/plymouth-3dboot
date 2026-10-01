@@ -11,7 +11,7 @@ use plymouth_3dboot::math::{Vec3, Viewport};
 use plymouth_3dboot::pipeline::{RenderState, Renderer};
 use plymouth_3dboot::raster::CullMode;
 use plymouth_3dboot::scene::{Camera, Scene};
-use plymouth_3dboot::shading::{DrawParams, Lighting, ShadingModel, draw_mesh};
+use plymouth_3dboot::shading::{DrawParams, Lighting, ShadingModel, draw_scene};
 use plymouth_3dboot::target::Framebuffer;
 use plymouth_3dboot_testutil::{Tolerance, golden};
 
@@ -72,20 +72,15 @@ fn render(scene: &Scene, direction: Vec3, model: ShadingModel) -> Framebuffer {
     let mut state = RenderState::new(Viewport::new(SIZE, SIZE));
     state.cull = CullMode::Back;
     let mut target = Framebuffer::new(SIZE, SIZE, BACKGROUND).unwrap();
-    let mut renderer = Renderer::new();
-    for (node, m) in scene.nodes().iter().zip(&world) {
-        if let Some(mesh) = node.mesh {
-            draw_mesh(
-                &mut renderer,
-                &mut target,
-                &state,
-                &params,
-                &scene.meshes()[mesh.0],
-                *m,
-            )
-            .unwrap();
-        }
-    }
+    draw_scene(
+        &mut Renderer::new(),
+        &mut target,
+        &state,
+        &params,
+        scene,
+        &world,
+    )
+    .unwrap();
     target
 }
 

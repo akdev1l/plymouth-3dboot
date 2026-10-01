@@ -17,7 +17,7 @@ use crate::color::LinearRgba;
 use crate::math::{Mat3, Mat4, Vec3};
 use crate::pipeline::{DrawError, DrawStats, RenderState, Renderer};
 use crate::raster::CullMode;
-use crate::scene::{Camera, Material, Mesh};
+use crate::scene::{Camera, Material, Mesh, Scene};
 use crate::target::Framebuffer;
 
 /// A light infinitely far away, shining in one direction.
@@ -192,6 +192,39 @@ pub fn draw_mesh(
     Ok(total)
 }
 
+/// Draws every mesh node of `scene`, each placed by its entry in `world`
+/// (from [`Scene::world_matrices`] or an animated
+/// [`crate::anim::Pose::world`]). Stats are summed over all meshes.
+///
+/// # Errors
+///
+/// Stops at the first mesh that fails; see [`draw_mesh`].
+///
+/// # Panics
+///
+/// Panics if `world` does not have one matrix per node.
+pub fn draw_scene(
+    renderer: &mut Renderer,
+    target: &mut Framebuffer,
+    state: &RenderState,
+    params: &DrawParams<'_>,
+    scene: &Scene,
+    world: &[Mat4],
+) -> Result<DrawStats, ShadeError> {
+    assert_eq!(
+        world.len(),
+        scene.nodes().len(),
+        "one world matrix per node"
+    );
+    let mut total = DrawStats::default();
+    for (node, m) in scene.nodes().iter().zip(world) {
+        if let Some(mesh) = node.mesh {
+            total += draw_mesh(renderer, target, state, params, &scene.meshes()[mesh.0], *m)?;
+        }
+    }
+    Ok(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +310,43 @@ mod tests {
         )
         .unwrap();
         assert_eq!(target.color.get(8, 8), Some(Rgba8::WHITE));
+    }
+
+    #[test]
+    fn draw_scene_draws_every_mesh_node_with_its_world_matrix() {
+        use crate::scene::{LocalTransform, Node, Transform};
+        let mut scene = Scene::new();
+        let mesh = scene.add_mesh(uv_sphere(0.5, 8, 4));
+        for x in [-1.0, 1.0] {
+            let t = LocalTransform::Trs(Transform {
+                translation: Vec3::new(x, 0.0, 0.0),
+                ..Transform::IDENTITY
+            });
+            scene
+                .add_node(None, Node::new("s", t).with_mesh(mesh))
+                .unwrap();
+        }
+        let mut target = Framebuffer::new(32, 32, Rgba8::BLACK).unwrap();
+        let params = DrawParams {
+            camera: &camera(),
+            lighting: &Lighting::default(),
+            model: ShadingModel::Unlit,
+            materials: &[],
+        };
+        let stats = draw_scene(
+            &mut Renderer::new(),
+            &mut target,
+            &RenderState::new(Viewport::new(32, 32)),
+            &params,
+            &scene,
+            &scene.world_matrices(),
+        )
+        .unwrap();
+        assert_eq!(stats.triangles, 2 * scene.meshes()[0].triangle_count());
+        // Both spheres are visible: left and right of the centre.
+        assert_eq!(target.color.get(10, 16), Some(Rgba8::WHITE));
+        assert_eq!(target.color.get(22, 16), Some(Rgba8::WHITE));
+        assert_eq!(target.color.get(16, 16), Some(Rgba8::BLACK));
     }
 
     #[test]

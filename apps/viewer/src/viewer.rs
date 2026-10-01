@@ -6,7 +6,7 @@ use plymouth_3dboot::math::{Aabb, Vec3, Viewport};
 use plymouth_3dboot::pipeline::{RenderState, Renderer};
 use plymouth_3dboot::raster::CullMode;
 use plymouth_3dboot::scene::{Camera, Scene};
-use plymouth_3dboot::shading::{DrawParams, Lighting, ShadingModel, draw_mesh};
+use plymouth_3dboot::shading::{DrawParams, Lighting, ShadingModel, draw_scene};
 use plymouth_3dboot::target::{ColorBuffer, Framebuffer};
 use plymouth_3dboot_sdl::{App, Control, InputEvent};
 
@@ -201,19 +201,15 @@ impl App for Viewer {
         let mut state = RenderState::new(Viewport::new(w, h));
         state.cull = CullMode::Back;
         let world = self.scene.world_matrices();
-        for (node, m) in self.scene.nodes().iter().zip(&world) {
-            if let Some(mesh) = node.mesh
-                && let Err(e) = draw_mesh(
-                    &mut self.renderer,
-                    &mut self.target,
-                    &state,
-                    &params,
-                    &self.scene.meshes()[mesh.0],
-                    *m,
-                )
-            {
-                eprintln!("draw failed: {e}");
-            }
+        if let Err(e) = draw_scene(
+            &mut self.renderer,
+            &mut self.target,
+            &state,
+            &params,
+            &self.scene,
+            &world,
+        ) {
+            eprintln!("draw failed: {e}");
         }
         &self.target.color
     }
