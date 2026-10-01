@@ -3,8 +3,10 @@
 //! window, and per-fragment interpolation and depth testing.
 
 pub mod clip;
+pub mod screen;
 
 pub use clip::Clipper;
+pub use screen::ScreenVertex;
 
 use crate::math::{Mat4, Vec3, Vec4};
 
