@@ -10,6 +10,7 @@
 pub mod color;
 pub mod io;
 pub mod math;
+pub mod pipeline;
 pub mod raster;
 pub mod target;
 
