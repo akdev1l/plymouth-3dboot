@@ -11,6 +11,7 @@ ARG NEXTEST_VERSION=0.9.146
 ARG CARGO_DENY_VERSION=0.20.2
 ARG CARGO_LLVM_COV_VERSION=0.9.1
 ARG CARGO_C_VERSION=0.10.25+cargo-0.99.0
+ARG EMSDK_VERSION=6.0.10
 
 # System packages:
 # - build-essential, cmake, pkg-config: C toolchain for native deps and C tests
@@ -44,10 +45,29 @@ RUN cargo install --locked just --version "${JUST_VERSION}" \
     && cargo install --locked cargo-c --version "${CARGO_C_VERSION}" \
     && rm -rf "${CARGO_HOME}/registry" "${CARGO_HOME}/git"
 
+RUN rustup target add wasm32-unknown-emscripten
+
 # Unprivileged user. Run with `--userns=keep-id` so files created in the
 # mounted repository are owned by the host user.
-RUN useradd --create-home --uid 1000 --shell /bin/bash dev
+RUN useradd --create-home --uid 1000 --shell /bin/bash dev \
+    && mkdir /opt/emsdk && chown dev:dev /opt/emsdk
 USER dev
+
+# Emscripten SDK, pinned. The emsdk tree is owned by `dev` so its cache can
+# be written at runtime; SDL3 and the system libraries are prebuilt here so
+# builds do not need network access.
+RUN git clone --depth 1 --branch "${EMSDK_VERSION}" \
+        https://github.com/emscripten-core/emsdk.git /opt/emsdk \
+    && cd /opt/emsdk \
+    && ./emsdk install "${EMSDK_VERSION}" \
+    && ./emsdk activate "${EMSDK_VERSION}" \
+    && ln -s "$(dirname "$(find /opt/emsdk/node -path '*/bin/node' | head -n 1)")" /opt/emsdk/node/current \
+    && . ./emsdk_env.sh \
+    && embuilder build MINIMAL sdl3 \
+    && rm -rf /opt/emsdk/downloads
+ENV EMSDK=/opt/emsdk \
+    EMSDK_NODE=/opt/emsdk/node/current/node \
+    PATH=/opt/emsdk:/opt/emsdk/upstream/emscripten:/opt/emsdk/node/current:${PATH}
 # Tools stay in /usr/local/cargo/bin (on PATH); the registry cache is per-user
 # and mounted as a volume by scripts/dev.sh.
 ENV CARGO_HOME=/home/dev/.cargo \
