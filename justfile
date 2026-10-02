@@ -107,12 +107,13 @@ plymouth-install: plymouth
     grep -qx 'ModelFile=/usr/share/plymouth/themes/3dboot-n64/n64_logo_spin.dae' target/plymouth-root/usr/share/plymouth/themes/3dboot-n64/3dboot-n64.plymouth
     @echo "plugin and theme install OK"
 
-# Run the plugin's headless harness under valgrind.
+# Run the plugin's headless harness under valgrind (keeping symbols of
+# libraries the harness unloads, for readable reports and suppressions).
 test-plymouth: plymouth
     # The build directory has no soname link (cargo cinstall creates it).
     ln -sf libplymouth_3dboot.so target/capi/x86_64-unknown-linux-gnu/debug/libplymouth_3dboot.so.0
     meson test -C target/plymouth --print-errorlogs \
-        --wrapper "valgrind --quiet --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite,indirect --suppressions=$PWD/plymouth/tests/valgrind.supp"
+        --wrapper "valgrind --quiet --keep-debuginfo=yes --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite,indirect --suppressions=$PWD/plymouth/tests/valgrind.supp"
 
 
 # Check size and speed budgets of the release C library (docs/perf.md).
@@ -133,6 +134,11 @@ budgets:
 capi-header:
     cargo cbuild --locked -p plymouth-3dboot-capi --target-dir target/capi
     cp target/capi/x86_64-unknown-linux-gnu/debug/include/plymouth-3dboot.h crates/plymouth-3dboot-capi/include/
+
+# Build RPMs from the working tree into dist/rpm/ (Fedora container only:
+# DEV_CONTAINER=fedora scripts/dev.sh just rpm).
+rpm:
+    scripts/build-rpm.sh
 
 # Run the criterion benchmarks (native, not part of check).
 bench *args:

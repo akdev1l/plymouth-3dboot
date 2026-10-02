@@ -10,3 +10,26 @@
    fun:ply_event_loop_watch_fd
    fun:ply_event_loop_new
 }
+
+# Plymouth 24's ply_label_unload_plugin (called by ply_label_free) closes
+# the label plugin without calling its destroy_control, so the control that
+# ply_label_show created leaks, with its text and attributes. Seen only where
+# a label plugin is installed (the Fedora container). A label this project
+# forgot to free would still be reported: ply_label_new allocates in libply.
+{
+   libply-label-free-never-destroys-the-label-control
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/plymouth/label-*.so
+}
+
+# Font caches that fontconfig (used by the label-pango plugin) keeps for the
+# life of the process.
+{
+   fontconfig-font-caches
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libfontconfig.so*
+}
