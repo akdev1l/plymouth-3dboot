@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi browser-smoke deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c browser-smoke deny
 
 # Format all code.
 fmt:
@@ -84,6 +84,10 @@ smoke-example:
 capi:
     cargo cbuild --locked -p plymouth-3dboot-capi --target-dir target/capi
     scripts/check-capi.sh target/capi/x86_64-unknown-linux-gnu/debug
+
+# Build and run the C API tests (shared and static) under valgrind.
+test-c: capi
+    scripts/test-c.sh target/capi/x86_64-unknown-linux-gnu/debug
 
 # Regenerate the committed C header after an intended API change.
 capi-header:
