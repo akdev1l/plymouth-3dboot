@@ -4,6 +4,12 @@
 //! All symbols are prefixed `p3b_`. See `docs/c-api.md` for ownership,
 //! threading and error-handling rules.
 
+// The guard helpers are used by the entry points added next.
+#[allow(dead_code)]
+mod error;
+
+pub use error::{p3b_last_error, p3b_status};
+
 use std::ffi::{CStr, c_char};
 
 /// ABI version: incremented on every incompatible change to the C API

@@ -9,7 +9,9 @@ usize_is_size_t = true
 
 [export]
 prefix = ""
+include = ["p3b_status"]
 
 [enum]
+# p3b_status variants become P3B_STATUS_OK, P3B_STATUS_NULL_POINTER, ...
 rename_variants = "ScreamingSnakeCase"
 prefix_with_name = true
