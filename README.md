@@ -32,7 +32,8 @@ scripts/dev.sh               # interactive shell
 
 ### Viewer
 
-`apps/viewer` shows a model (the embedded N64 logo by default):
+`apps/viewer` shows a model (the embedded N64 logo by default), playing its
+COLLADA animation or else spinning it on a turntable:
 
 ```sh
 cargo run -p plymouth-3dboot-viewer -- [MODEL.obj|MODEL.dae] [--shading unlit|lambert|blinn-phong] \

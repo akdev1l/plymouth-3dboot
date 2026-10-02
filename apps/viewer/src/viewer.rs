@@ -292,6 +292,7 @@ mod tests {
         use plymouth_3dboot::scene::{LocalTransform, Node};
         let (scene, root) = crate::model::embedded_n64()
             .unwrap()
+            .scene
             .wrapped_in_root(Node::new("spin", LocalTransform::default()));
         let clip = Clip::turntable(root, Vec3::Y, 4.0);
         let options = ViewerOptions {
@@ -319,7 +320,7 @@ mod tests {
     #[test]
     fn update_quits_and_renders_at_capped_size() {
         let mut v = Viewer::new(
-            crate::model::embedded_n64().unwrap(),
+            crate::model::embedded_n64().unwrap().scene,
             None,
             ViewerOptions {
                 max_resolution: 64,

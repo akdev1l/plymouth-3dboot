@@ -4,17 +4,18 @@
 //! Usage: `plymouth-3dboot-viewer [MODEL.obj|MODEL.dae] [--shading unlit|lambert|blinn-phong]
 //! [--turntable SECONDS | --still] [--frames N] [--max-resolution PX]`
 //!
-//! Without a model the embedded N64 logo is shown. The model spins on a
-//! turntable (one turn per 6 s by default) unless `--still` is given.
+//! Without a model the embedded N64 logo is shown. A model's own animation
+//! (COLLADA clips) plays if it has one; otherwise it spins on a turntable
+//! (one turn per 6 s). `--turntable SECONDS` forces a turntable, `--still`
+//! disables animation.
 //! Drag with the left mouse button to orbit, scroll to zoom, Space to pause,
 //! +/- to change speed, R to reset, Escape or Q to quit.
 
 mod model;
 mod viewer;
 
-use plymouth_3dboot::anim::Clip;
+use plymouth_3dboot::Model;
 use plymouth_3dboot::math::Vec3;
-use plymouth_3dboot::scene::{LocalTransform, Node};
 use plymouth_3dboot::shading::ShadingModel;
 use plymouth_3dboot_sdl::{Presenter, RunOptions, WindowConfig, run};
 use viewer::{Viewer, ViewerOptions};
@@ -25,8 +26,18 @@ struct Args {
     model: Option<std::path::PathBuf>,
     options: ViewerOptions,
     frames: Option<u64>,
-    /// Seconds per turntable revolution; `None` for a still model.
-    turntable: Option<f32>,
+    animation: Animation,
+}
+
+/// What to animate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Animation {
+    /// The model's first clip, or a 6 s turntable if it has none.
+    Auto,
+    /// A turntable with this period in seconds.
+    Turntable(f32),
+    /// Nothing.
+    Still,
 }
 
 impl Default for Args {
@@ -35,7 +46,7 @@ impl Default for Args {
             model: None,
             options: ViewerOptions::default(),
             frames: None,
-            turntable: Some(6.0),
+            animation: Animation::Auto,
         }
     }
 }
@@ -61,9 +72,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
                 if !(period.is_finite() && period > 0.0) {
                     return Err("--turntable needs a positive number of seconds".into());
                 }
-                out.turntable = Some(period);
+                out.animation = Animation::Turntable(period);
             }
-            "--still" => out.turntable = None,
+            "--still" => out.animation = Animation::Still,
             "--frames" => {
                 out.frames = Some(
                     value("--frames")?
@@ -93,23 +104,31 @@ fn main() {
 
 fn try_main() -> Result<(), String> {
     let args = parse_args(std::env::args().skip(1))?;
-    let scene = match &args.model {
-        Some(path) => model::load_file(path)?,
-        None => model::embedded_n64()?,
-    };
+    let model = match &args.model {
+        Some(path) => Model::load(path),
+        None => model::embedded_n64(),
+    }
+    .map_err(|e| e.to_string())?;
+    for w in &model.warnings {
+        eprintln!("warning: {w}");
+    }
     let presenter = Presenter::new(&WindowConfig {
         title: "plymouth-3dboot viewer".into(),
         ..WindowConfig::default()
     })
     .map_err(|e| e.to_string())?;
-    let (scene, clip) = match args.turntable {
-        Some(period) => {
-            let (scene, root) =
-                scene.wrapped_in_root(Node::new("turntable", LocalTransform::default()));
-            (scene, Some(Clip::turntable(root, Vec3::Y, period)))
-        }
-        None => (scene, None),
+    let model = match (args.animation, model.clips.is_empty()) {
+        (Animation::Turntable(period), _) => model.with_turntable(Vec3::Y, period),
+        (Animation::Auto, true) => model.with_turntable(Vec3::Y, 6.0),
+        _ => model,
     };
+    let clip = match args.animation {
+        Animation::Still => None,
+        // The model's own clip, or the turntable just added (the last one).
+        Animation::Auto => model.clips.first().cloned(),
+        Animation::Turntable(_) => model.clips.last().cloned(),
+    };
+    let scene = model.scene;
     let viewer = Viewer::new(scene, clip, args.options);
     let options = RunOptions {
         max_frames: args.frames,
@@ -145,9 +164,12 @@ mod tests {
             (ShadingModel::Lambert, Some(3), 200)
         );
         assert!(parse(&[]).unwrap().model.is_none());
-        assert_eq!(parse(&[]).unwrap().turntable, Some(6.0));
-        assert_eq!(parse(&["--turntable", "2.5"]).unwrap().turntable, Some(2.5));
-        assert_eq!(parse(&["--still"]).unwrap().turntable, None);
+        assert_eq!(parse(&[]).unwrap().animation, Animation::Auto);
+        assert_eq!(
+            parse(&["--turntable", "2.5"]).unwrap().animation,
+            Animation::Turntable(2.5)
+        );
+        assert_eq!(parse(&["--still"]).unwrap().animation, Animation::Still);
     }
 
     #[test]

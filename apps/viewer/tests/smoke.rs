@@ -8,6 +8,10 @@ fn viewer_runs_headless_and_exits() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/fixtures/n64_logo/n64_logo.obj"
     );
+    let spin = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/n64_logo/n64_logo_spin.dae"
+    );
     let dae = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/fixtures/n64_logo/n64_logo.dae"
@@ -16,6 +20,8 @@ fn viewer_runs_headless_and_exits() {
         vec!["--frames", "3"],
         vec![obj, "--shading", "blinn-phong", "--frames", "2"],
         vec![dae, "--shading", "lambert", "--frames", "2"],
+        vec![spin, "--frames", "2"],
+        vec![spin, "--still", "--frames", "1"],
     ] {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_plymouth-3dboot-viewer"))
             .args(&args)
