@@ -38,8 +38,9 @@ pub struct ColladaModel {
     /// The scene. Its single root node (named `collada`) holds the up-axis
     /// and unit conversion; the document's nodes are below it.
     pub scene: Scene,
-    /// Animation clips (one clip with every channel when the document
-    /// defines animations but no `<library_animation_clips>`).
+    /// Animation clips: one per `<animation_clip>` (playing its
+    /// `start`..`end` range), or a single `default` clip with every channel
+    /// when the document has animations but no clip library.
     pub clips: Vec<Clip>,
     /// Problems that did not prevent loading (unsupported features).
     pub warnings: Vec<String>,
@@ -67,12 +68,7 @@ pub fn load_collada(
 ) -> Result<ColladaModel, ColladaError> {
     let doc = xml::Document::parse(text)?;
     let (scene, nodes, mut warnings) = scene::build_scene(&doc, options)?;
-    let channels = animation::parse_library(&doc, &nodes, &mut warnings)?;
-    let clips = if channels.is_empty() {
-        Vec::new()
-    } else {
-        vec![Clip::new("default", channels)]
-    };
+    let clips = animation::parse_clips(&doc, &nodes, &mut warnings)?;
     Ok(ColladaModel {
         scene,
         clips,

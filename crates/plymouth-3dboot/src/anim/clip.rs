@@ -96,6 +96,7 @@ pub struct Clip {
     pub name: String,
     /// The animated properties.
     pub channels: Vec<Channel>,
+    start: f32,
     duration: f32,
 }
 
@@ -110,8 +111,30 @@ impl Clip {
         Self {
             name: name.into(),
             channels,
+            start: 0.0,
             duration,
         }
+    }
+
+    /// Restricts playback to the key times `[start, end]` (e.g. one clip of
+    /// a longer animation): playback time 0 maps to `start`. Non-finite
+    /// values give an empty range at 0.
+    #[must_use]
+    pub fn with_range(mut self, start: f32, end: f32) -> Self {
+        if start.is_finite() && end.is_finite() {
+            self.start = start;
+            self.duration = (end - start).max(0.0);
+        } else {
+            self.start = 0.0;
+            self.duration = 0.0;
+        }
+        self
+    }
+
+    /// Key time at which playback starts.
+    #[must_use]
+    pub fn start(&self) -> f32 {
+        self.start
     }
 
     /// Overrides the duration (e.g. a loop that holds the last pose for a
@@ -132,14 +155,14 @@ impl Clip {
         self.duration
     }
 
-    /// Maps playback time `t` (seconds, any value) to clip-local time in
-    /// `[0, duration]`. Wrapping is computed in `f64` so long-running
+    /// Maps playback time `t` (seconds, any value) to the key time in
+    /// `[start, start + duration]` to sample. Wrapping is computed in `f64` so long-running
     /// playback keeps full precision.
     #[must_use]
     pub fn local_time(&self, t: f64, wrap: WrapMode) -> f32 {
         let d = f64::from(self.duration);
         if d <= 0.0 || !t.is_finite() {
-            return 0.0;
+            return self.start;
         }
         let local = match wrap {
             WrapMode::Clamp => t.clamp(0.0, d),
@@ -152,7 +175,7 @@ impl Clip {
         // `local` is within [0, d] and d fits in f32.
         #[allow(clippy::cast_possible_truncation)]
         let local = local as f32;
-        local
+        self.start + local
     }
 }
 
@@ -225,6 +248,17 @@ mod tests {
             assert_eq!(c.local_time(t, WrapMode::Loop), looped, "loop {t}");
             assert_eq!(c.local_time(t, WrapMode::PingPong), ping, "ping-pong {t}");
         }
+    }
+
+    #[test]
+    fn ranges_offset_and_limit_playback() {
+        let c = clip(10.0).with_range(2.0, 5.0);
+        assert_eq!((c.start(), c.duration()), (2.0, 3.0));
+        assert_eq!(c.local_time(0.0, WrapMode::Loop), 2.0);
+        assert_eq!(c.local_time(4.0, WrapMode::Loop), 3.0);
+        assert_eq!(c.local_time(9.0, WrapMode::Clamp), 5.0);
+        let bad = clip(1.0).with_range(f32::NAN, 1.0);
+        assert_eq!((bad.start(), bad.duration()), (0.0, 0.0));
     }
 
     #[test]

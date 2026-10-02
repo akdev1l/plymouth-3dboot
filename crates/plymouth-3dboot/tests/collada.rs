@@ -332,3 +332,29 @@ fn bezier_channels_become_cubic_splines() {
         assert!((p.x - x).abs() < 2e-5, "t = {t}: {} vs {x}", p.x);
     }
 }
+
+#[test]
+fn animation_clips_select_channels_and_ranges() {
+    let m = anim_fixture("clips.dae");
+    assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+    let names: Vec<&str> = m.clips.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["slide", "lift"]);
+    let (slide, lift) = (&m.clips[0], &m.clips[1]);
+    assert_eq!(
+        (slide.channels.len(), slide.start(), slide.duration()),
+        (1, 0.0, 1.0)
+    );
+    assert_eq!(
+        (lift.channels.len(), lift.start(), lift.duration()),
+        (1, 0.5, 1.5)
+    );
+    // Playing `lift` from 0 starts at key time 0.5 (a quarter of the lift).
+    let child = m.scene.find_node("child").unwrap();
+    let t = lift.local_time(0.0, plymouth_3dboot::anim::WrapMode::Loop);
+    let world = Pose::evaluate(&m.scene, lift, t).world(&m.scene);
+    assert!(
+        world[child.0]
+            .transform_point3(Vec3::ZERO)
+            .abs_diff_eq(Vec3::new(0.0, 1.0, 0.0), 1e-6)
+    );
+}

@@ -35,3 +35,4 @@ animation importer:
 | `matrix_step.dae` | whole-`matrix` channel (row-major `float4x4`), STEP |
 | `translate_x.dae` | `translate.X` member and whole-vector channels, nested `<animation>` |
 | `translate_bezier.dae` | BEZIER `translate.X` ease-in-out (control points at one third), 0 → 3 → 0 over 2 s |
+| `clips.dae` | `<library_animation_clips>`: `slide` (0–1 s) and `lift` (0.5–2 s) over the `translate_x.dae` animations |

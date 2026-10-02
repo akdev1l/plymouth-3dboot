@@ -7,7 +7,7 @@ use roxmltree::Node as XmlNode;
 use super::ColladaError;
 use super::scene::NodeMap;
 use super::xml::{Document, attr, children, numbers, require};
-use crate::anim::{Channel, ElementTrack, Interpolation, Property, Track};
+use crate::anim::{Channel, Clip, ElementTrack, Interpolation, Property, Track};
 use crate::math::{Mat4, Vec3};
 
 /// The parsed address of a channel target such as `node/rotateY.ANGLE`,
@@ -374,6 +374,54 @@ pub(crate) fn parse_library(
         }
     }
     Ok(out)
+}
+
+/// The document's clips: one per `<animation_clip>`, or one `default`
+/// clip with every channel if there is no clip library.
+pub(crate) fn parse_clips(
+    doc: &Document<'_>,
+    nodes: &NodeMap,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Clip>, ColladaError> {
+    let clip_nodes: Vec<XmlNode<'_, '_>> = children(doc.root(), "library_animation_clips")
+        .flat_map(|l| children(l, "animation_clip"))
+        .collect();
+    if clip_nodes.is_empty() {
+        let channels = parse_library(doc, nodes, warnings)?;
+        return Ok(if channels.is_empty() {
+            Vec::new()
+        } else {
+            vec![Clip::new("default", channels)]
+        });
+    }
+    let mut clips = Vec::with_capacity(clip_nodes.len());
+    for node in clip_nodes {
+        let mut channels = Vec::new();
+        for instance in children(node, "instance_animation") {
+            channels.extend(parse_animation(
+                doc,
+                doc.by_uri(attr(doc, instance, "url")?)?,
+                nodes,
+                warnings,
+            )?);
+        }
+        let name = node
+            .attribute("name")
+            .or_else(|| node.attribute("id"))
+            .unwrap_or("");
+        let clip = Clip::new(name, channels);
+        let time = |a: &str| {
+            node.attribute(a)
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite())
+        };
+        let (start, end) = (
+            time("start").unwrap_or(0.0),
+            time("end").unwrap_or_else(|| clip.duration()),
+        );
+        clips.push(clip.with_range(start, end));
+    }
+    Ok(clips)
 }
 
 #[cfg(test)]
