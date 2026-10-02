@@ -3,8 +3,8 @@
 //!
 //! The core crate is pure Rust: it has no platform dependencies and produces
 //! identical output on native and WebAssembly targets. It performs no I/O of
-//! its own, except reading files through [`io::FsResolver`] when a caller
-//! chooses to use it.
+//! its own, except reading files through [`io::FsResolver`] and writing
+//! [`io::sequence::PngSequence`] files when a caller chooses to use them.
 
 #![forbid(unsafe_code)]
 
