@@ -8,6 +8,7 @@
 
 mod error;
 mod model;
+mod render;
 
 pub use error::{p3b_last_error, p3b_status};
 pub use model::{
@@ -15,6 +16,7 @@ pub use model::{
     p3b_model_clip_duration, p3b_model_free, p3b_model_load_file, p3b_model_load_memory,
     p3b_model_warning, p3b_model_warning_count, p3b_resolve_fn,
 };
+pub use render::*;
 
 use std::ffi::{CStr, c_char};
 
