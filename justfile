@@ -151,6 +151,7 @@ deny:
 golden-update:
     UPDATE_GOLDEN=1 cargo nextest run --locked --workspace --no-tests=pass
 
-# Line coverage summary for the workspace.
+# Line coverage summary for the workspace; fails below 85 % of lines (the
+# workspace was at 97 % when this was introduced).
 cov:
-    cargo llvm-cov nextest --locked --workspace --no-tests=pass
+    cargo llvm-cov nextest --locked --workspace --no-tests=pass --fail-under-lines 85

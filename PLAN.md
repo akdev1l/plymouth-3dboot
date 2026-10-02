@@ -618,8 +618,9 @@ The ABI is designed for C callers such as a Plymouth plugin:
 - *Tests:* banded output equals serial output, byte for byte, for any thread count (core, C API).
 - *Commits:* `perf(color): …` (×2), `perf(raster): visit only the covered span of each row`, `perf(raster): add tiled and parallel rasterization`
 
-**13.4 ≥85 % line coverage on core**
-- *Commit:* `test: raise coverage of core modules`
+**13.4 ≥85 % line coverage on core** ✅
+- Already met: 97.4 % of lines across the workspace, at least 88.9 % in every core file. `just cov` now fails below 85 %.
+- *Commit:* `test: enforce the line coverage threshold`
 
 ---
 
