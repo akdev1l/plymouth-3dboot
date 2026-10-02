@@ -22,6 +22,7 @@ plymouth-3dboot-testutil = { path = "crates/plymouth-3dboot-testutil" }
 # scalar-math + libm: identical results on native and wasm (no SIMD paths,
 # no platform libm), see docs/conventions.md.
 glam = { version = "0.33.12", default-features = false, features = ["std", "scalar-math", "libm"] }
+gif = { version = "0.14.2", default-features = false, features = ["std", "color_quant"] }
 bytemuck = { version = "1.25.2", features = ["derive"] }
 libm = "0.2.16"
 png = "0.18.1"

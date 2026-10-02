@@ -29,6 +29,7 @@ fmt-check:
 clippy:
     cargo clippy --locked --workspace --all-targets -- -D warnings
     cargo clippy --locked --workspace --all-targets --target {{wasm_target}} -- -D warnings
+    cargo clippy --locked -p plymouth-3dboot --no-default-features --all-targets -- -D warnings
 
 # Native tests (nextest) and doctests.
 test *args:

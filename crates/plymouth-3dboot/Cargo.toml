@@ -10,11 +10,17 @@ publish.workspace = true
 
 [dependencies]
 bytemuck.workspace = true
+gif = { workspace = true, optional = true }
 glam.workspace = true
 libm.workspace = true
 png.workspace = true
 roxmltree.workspace = true
 thiserror.workspace = true
+
+[features]
+default = ["gif"]
+# Animated GIF output (io::gif).
+gif = ["dep:gif"]
 
 [dev-dependencies]
 plymouth-3dboot-testutil.workspace = true

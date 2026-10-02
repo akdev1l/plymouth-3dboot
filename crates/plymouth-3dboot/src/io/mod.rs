@@ -7,6 +7,8 @@
 //! only place it writes; both only when a caller uses them.
 
 pub mod collada;
+#[cfg(feature = "gif")]
+pub mod gif;
 pub mod obj;
 pub mod png;
 pub mod resolve;
