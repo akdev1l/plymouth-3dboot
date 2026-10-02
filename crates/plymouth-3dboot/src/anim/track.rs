@@ -5,6 +5,7 @@ use crate::math::{Mat4, Quat, Vec3, Vec4};
 
 /// How values between keyframes are computed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Interpolation {
     /// Hold each key's value until the next key.
     Step,

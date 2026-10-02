@@ -46,6 +46,7 @@ impl Transform {
 
 /// One element of a transform stack.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum TransformOpKind {
     /// Translation.
     Translate(Vec3),
@@ -89,6 +90,7 @@ pub struct TransformOp {
 
 /// A node's transform relative to its parent.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum LocalTransform {
     /// Decomposed translation, rotation and scale (animatable per channel).
     Trs(Transform),

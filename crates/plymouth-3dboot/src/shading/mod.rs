@@ -54,6 +54,7 @@ impl Default for Lighting {
 
 /// How surfaces respond to light.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ShadingModel {
     /// The material's base colour, ignoring lights ("fully self-illuminated").
     #[default]

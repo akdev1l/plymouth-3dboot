@@ -59,6 +59,7 @@ impl FixedPoint {
     }
 
     /// Converts back to pixel coordinates.
+    #[cfg(test)]
     #[must_use]
     pub fn to_window(self) -> Vec2 {
         #[allow(clippy::cast_precision_loss)]

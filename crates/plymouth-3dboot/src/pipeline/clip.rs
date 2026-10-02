@@ -4,7 +4,7 @@
 //! Triangles are clipped against the near and far planes, a `w > 0` plane,
 //! and a guard band of ±[`GUARD_BAND`]·w in x and y (Sutherland–Hodgman).
 //! The guard band keeps window coordinates inside the rasterizer's range
-//! ([`crate::raster::fixed::MAX_COORD`]) for every supported viewport,
+//! ([`crate::raster::MAX_COORD`]) for every supported viewport,
 //! while the viewport scissor discards off-screen pixels. Clipping against
 //! the guard band rather than the screen edges means clip edges almost
 //! never fall on visible pixels.

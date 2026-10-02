@@ -66,7 +66,7 @@ mod tests {
     use super::*;
     use crate::math::Vec4;
     use crate::pipeline::clip::GUARD_BAND;
-    use crate::raster::fixed::MAX_COORD;
+    use crate::raster::MAX_COORD;
     use crate::target::MAX_DIMENSION;
 
     fn at(x: f32, y: f32, z: f32, w: f32) -> ClipVertex<()> {

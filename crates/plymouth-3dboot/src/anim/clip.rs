@@ -8,6 +8,7 @@ use crate::scene::NodeId;
 /// Animation of one element of a node's transform stack
 /// ([`crate::scene::LocalTransform::Stack`]), addressed by its `sid`.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum ElementTrack {
     /// The whole value of a `translate` or `scale` element.
     Vector(Track<Vec3>),
@@ -37,6 +38,7 @@ impl ElementTrack {
 
 /// What a channel animates.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Property {
     /// Translation of a node.
     Translation(Track<Vec3>),

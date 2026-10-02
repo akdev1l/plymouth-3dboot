@@ -13,6 +13,7 @@ use crate::target::{ColorBuffer, Framebuffer, SizeError};
 
 /// Where the camera comes from.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum CameraSource {
     /// A fixed camera.
     Fixed(Camera),
