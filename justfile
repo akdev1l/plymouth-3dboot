@@ -38,7 +38,9 @@ test *args:
 
 # Tests compiled to wasm and run under node.
 test-wasm *args:
-    cargo test --locked --workspace {{wasm_test_flags}} "$@"
+    # Doctests run natively (`just test`): rustdoc does not get the wasm link
+    # flags (stack size) from target.rustflags.
+    cargo test --locked --workspace --lib --bins --tests {{wasm_test_flags}} "$@"
 
 # Build every target for wasm.
 build-wasm:

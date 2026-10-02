@@ -42,6 +42,9 @@ catches this.
   under `NODERAWFS` and heap growth past 256 MiB were all verified under node.
   No panic-related flags are needed.
 - libtest runs tests serially on this target (there are no threads).
+- Doctests run natively only. Cargo would cross-compile them, but rustdoc
+  does not receive the wasm link flags (such as the stack size) from
+  `target.rustflags`.
 - Test binaries also link with `-sNODERAWFS=1`, which gives direct
   host-filesystem access for fixtures and golden images. It is passed only by
   `just test-wasm`, through `--config` and a separate `target/wasm-test`
