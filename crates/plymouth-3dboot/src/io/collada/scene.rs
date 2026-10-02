@@ -101,7 +101,15 @@ fn transform_stack(
                     Vec3::new(tx, ty, tz),
                     Vec3::new(ux, uy, uz),
                 );
-                TransformOpKind::Matrix(view.inverse())
+                let camera = view.inverse();
+                if !camera.is_finite() {
+                    warnings.push(format!(
+                        "line {}: degenerate <lookat> (eye at target or up along the view) was ignored",
+                        doc.line(e)
+                    ));
+                    continue;
+                }
+                TransformOpKind::Matrix(camera)
             }
             "skew" => {
                 warnings.push(format!(

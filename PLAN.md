@@ -693,13 +693,13 @@ docs/                     conventions.md, toolchain.md, perf.md, c-api.md, plymo
 | Targets | `x86_64-unknown-linux-gnu`, `wasm32-unknown-emscripten` |
 | Phase 14 scope | deferred until Phase 13 is done |
 
-## 7. Open issues from review (to fix before Phase 11, C API)
+## 7. Issues from review
 
-Found by the Phase 7–8 code review. Not yet fixed.
+Found by the Phase 7–8 code review. Items 1–5 and the `fps` and `lookat`
+nits are fixed (commits `fix(io/collada): harden…`, `fix(anim): …`,
+`fix(render): frame…`). These remain open as minor items:
 
-1. COLLADA `instance_node` fan-out: a few KB of input can expand to millions of nodes, since only depth is limited. Track the nodes being expanded and cap the total node and vertex count.
-2. COLLADA integer overflow on hostile input (`offset`, `vcount`, accessor `count × stride`, and u32 index + base in `geometry.rs`): this panics, or with release wrapping reads the wrong data. Use checked arithmetic and return errors.
-3. `geometry.rs` caches sources by URI only, so a source used as both NORMAL and TEXCOORD breaks. Key the cache by (source, kind).
-4. `Pose`: TRS channels on stack/matrix nodes decompose the matrix. A zero scale gives NaN, shear is dropped, and later StackElement channels are ignored. Compose without decomposing.
-5. `AnimationRenderer` frames the rest pose only, so animated models (e.g. bounce) can leave the frame. Frame the union of bounds over sampled poses.
-6. Nits: validate `fps > 0`; handle a degenerate `lookat`; mirrored camera parents; an unparsable `set`; shininess ≤ 1 heuristic.
+- A camera node under a mirrored parent loses the reflection.
+- An unparsable `set` attribute silently becomes 0.
+- COLLADA shininess ≤ 1 is treated as normalized glossiness (×128). This is
+  correct for 3ds Max exports but wrong for genuine Phong exponents ≤ 1.

@@ -96,6 +96,20 @@ fn z_up_and_units_are_converted() {
 }
 
 #[test]
+fn degenerate_lookat_is_ignored_with_a_warning() {
+    let m = load(
+        &doc("", "<lookat>1 2 3  1 2 3  0 1 0</lookat>"),
+        ColladaOptions::default(),
+    );
+    assert!(
+        m.warnings.iter().any(|w| w.contains("lookat")),
+        "{:?}",
+        m.warnings
+    );
+    assert!(world_vertex(&m).abs_diff_eq(Vec3::X, 1e-6));
+}
+
+#[test]
 fn x_up_is_converted() {
     let p = world_vertex(&load(
         &doc("<up_axis>X_UP</up_axis>", ""),
