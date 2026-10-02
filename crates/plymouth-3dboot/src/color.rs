@@ -28,6 +28,38 @@ pub fn linear_to_srgb(c: f32) -> f32 {
     }
 }
 
+/// Linear value of each sRGB-encoded byte (computed once).
+pub(crate) fn srgb8_decode_table() -> &'static [f32; 256] {
+    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        std::array::from_fn(|i| {
+            srgb_to_linear(f32::from(u8::try_from(i).unwrap_or(u8::MAX)) / 255.0)
+        })
+    })
+}
+
+/// Linear values at which the encoded byte rounds up: `thresholds[k]` is
+/// the linear value of sRGB `(k + 0.5) / 255`, separating byte `k` from
+/// `k + 1`.
+fn srgb8_thresholds() -> &'static [f32; 255] {
+    static TABLE: std::sync::OnceLock<[f32; 255]> = std::sync::OnceLock::new();
+    #[allow(clippy::cast_precision_loss)]
+    TABLE.get_or_init(|| std::array::from_fn(|k| srgb_to_linear((k as f32 + 0.5) / 255.0)))
+}
+
+/// Encodes a linear value in `[0, 1]` as the nearest sRGB byte (values
+/// outside are clamped, NaN gives 0). Uses a table of rounding thresholds
+/// instead of evaluating the transfer function, which is exact, fast and
+/// identical on every target.
+#[must_use]
+pub fn encode_srgb8(linear: f32) -> u8 {
+    if linear.is_nan() {
+        return 0;
+    }
+    let k = srgb8_thresholds().partition_point(|&threshold| threshold <= linear);
+    u8::try_from(k).unwrap_or(u8::MAX)
+}
+
 /// Quantizes a `[0, 1]` value to `u8`, rounding to nearest. Out-of-range
 /// values are clamped, and NaN maps to 0.
 #[must_use]
@@ -144,13 +176,14 @@ impl LinearRgba {
         Self::from_srgb(f(c.r), f(c.g), f(c.b), f(c.a))
     }
 
-    /// Encodes to 8-bit sRGB, clamping out-of-range components.
+    /// Encodes to 8-bit sRGB, clamping out-of-range components (see
+    /// [`encode_srgb8`]).
     #[must_use]
     pub fn to_srgb8(self) -> Rgba8 {
         Rgba8::new(
-            unorm8(linear_to_srgb(self.r.clamp(0.0, 1.0))),
-            unorm8(linear_to_srgb(self.g.clamp(0.0, 1.0))),
-            unorm8(linear_to_srgb(self.b.clamp(0.0, 1.0))),
+            encode_srgb8(self.r),
+            encode_srgb8(self.g),
+            encode_srgb8(self.b),
             unorm8(self.a),
         )
     }
@@ -210,6 +243,24 @@ mod tests {
         assert!((linear_to_srgb(1.0) - 1.0).abs() < 1e-6);
         // Linear segment.
         assert!((srgb_to_linear(0.04) - 0.04 / 12.92).abs() < 1e-9);
+    }
+
+    #[test]
+    fn table_encoding_matches_the_transfer_function() {
+        let mut differing = 0;
+        for i in 0..=100_000 {
+            #[allow(clippy::cast_precision_loss)]
+            let linear = i as f32 / 100_000.0;
+            let direct = unorm8(linear_to_srgb(linear));
+            let table = encode_srgb8(linear);
+            assert!(table.abs_diff(direct) <= 1, "{linear}");
+            differing += usize::from(table != direct);
+        }
+        // Only values within float rounding of a threshold can differ.
+        assert!(differing < 10, "{differing} values differ");
+        assert_eq!(encode_srgb8(-1.0), 0);
+        assert_eq!(encode_srgb8(2.0), 255);
+        assert_eq!(encode_srgb8(f32::NAN), 0);
     }
 
     #[test]

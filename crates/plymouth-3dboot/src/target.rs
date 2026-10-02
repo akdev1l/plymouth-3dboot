@@ -230,34 +230,6 @@ impl Framebuffer {
     }
 }
 
-/// sRGB-encoded byte → linear value.
-fn decode_table() -> &'static [f32; 256] {
-    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| {
-        std::array::from_fn(|i| {
-            crate::color::srgb_to_linear(f32::from(u8::try_from(i).unwrap_or(u8::MAX)) / 255.0)
-        })
-    })
-}
-
-/// Linear values at which the sRGB encoding rounds up to the next byte:
-/// `thresholds[k]` separates byte `k` from `k + 1`.
-fn encode_thresholds() -> &'static [f32; 255] {
-    static TABLE: std::sync::OnceLock<[f32; 255]> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| {
-        std::array::from_fn(|k| crate::color::srgb_to_linear((k as f32 + 0.5) / 255.0))
-    })
-}
-
-/// Encodes a linear value as an sRGB byte (rounding like
-/// [`crate::color::LinearRgba::to_srgb8`], via table lookup).
-fn encode_srgb(linear: f32) -> u8 {
-    let t = encode_thresholds();
-    // Number of thresholds below the value = the encoded byte.
-    let k = t.partition_point(|&threshold| threshold <= linear);
-    u8::try_from(k).unwrap_or(u8::MAX)
-}
-
 /// Downsamples `src` by `factor` in each direction into `dst` (which must be
 /// `src` size / `factor`), averaging each `factor × factor` block in linear
 /// light (alpha averaged linearly). This is the resolve step of
@@ -277,7 +249,7 @@ pub fn downsample(src: &ColorBuffer, factor: u32, dst: &mut ColorBuffer) {
         dst.pixels_mut().copy_from_slice(src.pixels());
         return;
     }
-    let decode = decode_table();
+    let decode = crate::color::srgb8_decode_table();
     let (f, sw) = (factor as usize, src.width() as usize);
     #[allow(clippy::cast_precision_loss)]
     let inv = 1.0 / (f * f) as f32;
@@ -294,9 +266,9 @@ pub fn downsample(src: &ColorBuffer, factor: u32, dst: &mut ColorBuffer) {
                 }
             }
             *out = Rgba8::new(
-                encode_srgb(sum[0] * inv),
-                encode_srgb(sum[1] * inv),
-                encode_srgb(sum[2] * inv),
+                crate::color::encode_srgb8(sum[0] * inv),
+                crate::color::encode_srgb8(sum[1] * inv),
+                crate::color::encode_srgb8(sum[2] * inv),
                 crate::color::unorm8(sum[3] * inv / 255.0),
             );
         }
@@ -368,28 +340,6 @@ mod tests {
         assert!(fb.color.pixels().is_empty());
         assert!(fb.color.as_bytes().is_empty());
         assert_eq!(fb.color.get(0, 0), None);
-    }
-
-    #[test]
-    fn table_encoding_matches_the_reference() {
-        for v in 0..=255u8 {
-            assert_eq!(
-                encode_srgb(decode_table()[usize::from(v)]),
-                v,
-                "byte {v} round-trips"
-            );
-        }
-        for i in 0..=10_000 {
-            let linear = i as f32 / 10_000.0;
-            let reference = crate::color::LinearRgba::rgb(linear, 0.0, 0.0).to_srgb8().r;
-            assert!(
-                encode_srgb(linear).abs_diff(reference) <= 1,
-                "{linear}: {} vs {reference}",
-                encode_srgb(linear)
-            );
-        }
-        assert_eq!(encode_srgb(-1.0), 0);
-        assert_eq!(encode_srgb(2.0), 255);
     }
 
     #[test]
