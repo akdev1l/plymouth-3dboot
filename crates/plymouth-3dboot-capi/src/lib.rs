@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! C API for `plymouth-3dboot`, built as `libplymouth_3dboot` by cargo-c.
+
+#![allow(non_camel_case_types)] // C naming for the exported types
 //!
 //! All symbols are prefixed `p3b_`. See `docs/c-api.md` for ownership,
 //! threading and error-handling rules.
 
-// The guard helpers are used by the entry points added next.
-#[allow(dead_code)]
 mod error;
+mod model;
 
 pub use error::{p3b_last_error, p3b_status};
+pub use model::{
+    p3b_model, p3b_model_add_turntable, p3b_model_bounds, p3b_model_clip_count,
+    p3b_model_clip_duration, p3b_model_free, p3b_model_load_file, p3b_model_load_memory,
+    p3b_model_warning, p3b_model_warning_count, p3b_resolve_fn,
+};
 
 use std::ffi::{CStr, c_char};
 

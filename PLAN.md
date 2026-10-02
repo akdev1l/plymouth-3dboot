@@ -504,7 +504,7 @@ Each step lists **Deliverable / Tests / Done when / Commit**.
 ### Phase 11: C interface (`crates/plymouth-3dboot-capi`)
 
 The ABI is designed for C callers such as a Plymouth plugin:
-- Opaque handles: `p3b_scene`, `p3b_renderer`.
+- Opaque handles: `p3b_model` (scene, clips and warnings) and `p3b_renderer`.
 - Every function returns a `p3b_status` enum. `p3b_last_error()` gives a thread-local message.
 - **No panic crosses the boundary:** every entry point is wrapped in `catch_unwind` and returns `P3B_STATUS_PANIC`.
 - No Rust types appear in the header. All sizes are explicit (`uint32_t`, `size_t`).
@@ -522,11 +522,11 @@ The ABI is designed for C callers such as a Plymouth plugin:
 - *Tests:* a deliberate panic in a test-only entry point returns `PANIC` and does not abort. The error message is readable from the same thread and isolated between threads.
 - *Commit:* `feat(capi): add status codes, error reporting and panic containment`
 
-**11.3 Scene loading**
-- `p3b_scene_load_file(path, out)` and `p3b_scene_load_memory(format, data, len, resolver_cb, user_data, out)`. The callback resolves MTL and other side files from memory.
-- `p3b_scene_free`, `p3b_scene_clip_count`, `p3b_scene_clip_duration`, `p3b_scene_bounds`.
+**11.3 Model loading**
+- `p3b_model_load_file(path, out)` and `p3b_model_load_memory(format, data, len, resolver_cb, user_data, out)`. The callback resolves MTL and other side files from memory.
+- `p3b_model_free`, `p3b_model_clip_count`, `p3b_model_clip_duration`, `p3b_model_bounds`, `p3b_model_add_turntable`, `p3b_model_warning_count` and `p3b_model_warning`.
 - *Tests:* the N64 sample loads from a file and from memory; NULL pointers, bad UTF-8, an unknown format and truncated data each give the right status and never crash. Calling free with NULL is a no-op.
-- *Commit:* `feat(capi): load scenes from file or memory`
+- *Commit:* `feat(capi): load models from file or memory`
 
 **11.4 Renderer & frame output**
 - `p3b_renderer_new(width, height, const p3b_render_options*)`. Options: shading mode, background colour, cull mode, AA level, camera override (eye, target, fov) or auto-frame.
