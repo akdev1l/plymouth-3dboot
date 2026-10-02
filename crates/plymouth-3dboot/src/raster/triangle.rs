@@ -236,10 +236,32 @@ impl TriangleSetup {
         let step_x = self.edges.map(|e| e.step_x());
         let step_y = self.edges.map(|e| e.step_y());
         let bias = self.edges.map(|e| e.bias());
+        let (first, last) = (i64::from(x0), i64::from(x1) - 1);
         for y in y0..y1 {
-            let mut w = row;
-            for x in x0..x1 {
-                if w[0] + bias[0] > 0 && w[1] + bias[1] > 0 && w[2] + bias[2] > 0 {
+            // The covered pixels of this row form one span: solve each edge's
+            // `w(x) + bias > 0`, i.e. `w(x) >= 1 - bias`, for x exactly.
+            let (mut lo, mut hi) = (first, last);
+            for i in 0..3 {
+                let need = 1 - bias[i] - row[i]; // required increase of w
+                match step_x[i].signum() {
+                    1 => lo = lo.max(first - (-need).div_euclid(step_x[i])),
+                    -1 => hi = hi.min(first + (-need).div_euclid(-step_x[i])),
+                    _ if need > 0 => hi = lo - 1,
+                    _ => {}
+                }
+            }
+            if lo <= hi {
+                let offset = lo - first;
+                let mut w = [0; 3];
+                for i in 0..3 {
+                    w[i] = row[i] + step_x[i] * offset;
+                }
+                // lo..=hi lies within [x0, x1), which fits in u32.
+                let (lo, hi) = (
+                    u32::try_from(lo).unwrap_or(x1),
+                    u32::try_from(hi).unwrap_or(0),
+                );
+                for x in lo..=hi {
                     let mut edge_values = [0; 3];
                     for (i, &value) in w.iter().enumerate() {
                         edge_values[self.order[i]] = value;
@@ -250,9 +272,9 @@ impl TriangleSetup {
                         edge_values,
                         double_area: self.double_area,
                     });
-                }
-                for i in 0..3 {
-                    w[i] += step_x[i];
+                    for i in 0..3 {
+                        w[i] += step_x[i];
+                    }
                 }
             }
             for i in 0..3 {
