@@ -42,6 +42,9 @@ p3b_renderer_free(renderer);                          /* before the model */
 p3b_model_free(model);
 ```
 
+A complete program is in
+[`crates/plymouth-3dboot-capi/examples/render_ppm.c`](../crates/plymouth-3dboot-capi/examples/render_ppm.c).
+
 ## Contract
 
 - **Errors.** Every fallible function returns a `p3b_status`. On failure,

@@ -40,4 +40,13 @@ run() {
 run render "${fixtures}/n64_logo_spin.dae"
 run errors "${fixtures}/n64_logo.obj"
 run memory "${fixtures}/n64_logo.obj" "${fixtures}/n64_logo.mtl"
+# The example builds with pkg-config flags alone and produces an image.
+example="${out}/render_ppm"
+# shellcheck disable=SC2046
+cc -std=c11 -Wall -Wextra -Werror "${root}/crates/plymouth-3dboot-capi/examples/render_ppm.c" -o "${example}" \
+    $(PKG_CONFIG_PATH="${lib}" pkg-config --cflags plymouth-3dboot-uninstalled) -L "${out}/lib" -lplymouth_3dboot -Wl,-rpath,"${out}/lib"
+echo "== example render_ppm"
+"${valgrind[@]}" "${example}" "${fixtures}/n64_logo_spin.dae" "${out}/frame.ppm" 1.0
+[[ "$(head -c 2 "${out}/frame.ppm")" == "P6" && "$(stat -c %s "${out}/frame.ppm")" -eq $((15 + 320 * 240 * 3)) ]]
+
 echo "C API tests passed"
