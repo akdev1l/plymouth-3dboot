@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c browser-smoke deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c plymouth browser-smoke deny
 
 # Format all code.
 fmt:
@@ -88,6 +88,15 @@ capi:
 # Build and run the C API tests (shared and static) under valgrind.
 test-c: capi
     scripts/test-c.sh target/capi/x86_64-unknown-linux-gnu/debug
+
+# Build the Plymouth splash plugin (meson) against the freshly built C library.
+plymouth: capi
+    rm -rf target/plymouth
+    PKG_CONFIG_PATH="$PWD/target/capi/x86_64-unknown-linux-gnu/debug:${PKG_CONFIG_PATH:-}" \
+        meson setup target/plymouth plymouth >/dev/null
+    meson compile -C target/plymouth
+    @nm -D --defined-only target/plymouth/plymouth-3dboot.so | awk '$2 == "T" {print $3}' | grep -qx ply_boot_splash_plugin_get_interface
+    @echo "plugin OK: exports ply_boot_splash_plugin_get_interface"
 
 # Regenerate the committed C header after an intended API change.
 capi-header:
