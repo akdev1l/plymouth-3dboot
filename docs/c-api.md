@@ -60,12 +60,16 @@ p3b_model_free(model);
   `p3b_model_warning`) are owned by it; do not free them.
 - **Lifetimes.** A renderer borrows its model. The model must stay alive,
   and must not be modified (for example by `p3b_model_add_turntable`), until
-  every renderer created from it has been freed.
+  every renderer created from it has been freed. **Free renderers before
+  their model.**
+- **Limits.** Renderers are at most `P3B_MAX_SIZE` (8192) pixels per side.
+  The library requires `panic=unwind`; building it with `panic=abort` is a
+  compile error.
 - **Resolver callbacks.** `p3b_model_load_memory` calls `resolve` for files
   the model references, such as MTL libraries. Return 0 and set `*data` and
   `*len`, or return non-zero for "not found". The data must stay valid until
   the load call returns; the library copies it. Callbacks must not unwind
-  (for example by throwing C++ exceptions).
+  (for example by throwing C++ exceptions) and must not `longjmp` out.
 - **Threads.** Models and renderers may be created and used on any thread,
   but a renderer must not be used by two threads at once. Rendering is
   single-threaded and deterministic: the same model, options and time give

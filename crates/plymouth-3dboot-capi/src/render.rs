@@ -79,8 +79,9 @@ pub struct p3b_render_options {
     pub shading: p3b_shading,
     /// Background colour as R, G, B, A bytes (straight alpha).
     pub background: [u8; 4],
-    /// Whether back faces are culled (double-sided materials never are).
-    pub cull_back_faces: bool,
+    /// Non-zero to cull back faces (double-sided materials never are). An
+    /// integer rather than `bool`, so that any byte value is valid.
+    pub cull_back_faces: u8,
     /// Clip playback wrap mode.
     pub wrap: p3b_wrap,
     /// Camera mode.
@@ -110,7 +111,7 @@ pub extern "C" fn p3b_render_options_default() -> p3b_render_options {
     p3b_render_options {
         shading: P3B_SHADING_UNLIT,
         background: [0, 0, 0, 255],
-        cull_back_faces: true,
+        cull_back_faces: 1,
         wrap: P3B_WRAP_LOOP,
         camera_mode: P3B_CAMERA_MODE_FRAMED,
         view_direction: [-0.6, -0.45, -1.0],
@@ -180,7 +181,7 @@ fn settings(width: u32, height: u32, o: &p3b_render_options) -> Result<FrameSett
     Ok(FrameSettings {
         camera,
         shading,
-        cull: if o.cull_back_faces {
+        cull: if o.cull_back_faces != 0 {
             CullMode::Back
         } else {
             CullMode::None
@@ -189,6 +190,12 @@ fn settings(width: u32, height: u32, o: &p3b_render_options) -> Result<FrameSett
         ..FrameSettings::new(width, height)
     })
 }
+
+/// Largest renderer width or height. Colour plus depth take 8 bytes per
+/// pixel, so 8192 x 8192 needs 512 MiB; allocation failure would abort the
+/// host process, so sizes are bounded well below the core library's limit.
+pub const P3B_MAX_SIZE: u32 = 8192;
+use P3B_MAX_SIZE as MAX_SIZE;
 
 /// Renders frames of one model (opaque). Create with `p3b_renderer_new`;
 /// release with `p3b_renderer_free`. A renderer must only be used by one
@@ -232,10 +239,10 @@ pub unsafe extern "C" fn p3b_renderer_new(
         let options = unsafe { options.as_ref() }
             .copied()
             .unwrap_or_else(|| p3b_render_options_default());
-        if width == 0 || height == 0 {
+        if width == 0 || height == 0 || width > MAX_SIZE || height > MAX_SIZE {
             return Err((
                 p3b_status::InvalidArgument,
-                "width and height must be positive".into(),
+                format!("width and height must be between 1 and {MAX_SIZE}"),
             ));
         }
         let clip = match clip {
@@ -339,10 +346,12 @@ pub unsafe extern "C" fn p3b_render_frame(
                 format!("stride {stride} is less than width * 4 = {}", w * 4),
             ));
         }
-        let needed = stride
-            .checked_mul(h - 1)
-            .and_then(|n| n.checked_add(w * 4))
-            .unwrap_or(usize::MAX);
+        let Some(needed) = stride.checked_mul(h - 1).and_then(|n| n.checked_add(w * 4)) else {
+            return Err((
+                p3b_status::InvalidArgument,
+                "stride * height overflows".into(),
+            ));
+        };
         if dst_len < needed {
             return Err((
                 p3b_status::BufferTooSmall,
@@ -356,8 +365,10 @@ pub unsafe extern "C" fn p3b_render_frame(
             .inner
             .render_at(time)
             .map_err(|e| (p3b_status::Render, e.to_string()))?;
-        // SAFETY: `dst` points to `dst_len` writable bytes (contract).
-        let dst = unsafe { std::slice::from_raw_parts_mut(dst, dst_len) };
+        // SAFETY: `dst` points to `dst_len >= needed` writable bytes
+        // (contract). The slice covers only the bytes we write, a real
+        // allocation size unlike a caller's possibly oversized `dst_len`.
+        let dst = unsafe { std::slice::from_raw_parts_mut(dst, needed) };
         write_pixels(image, dst, stride, format);
         Ok(())
     })

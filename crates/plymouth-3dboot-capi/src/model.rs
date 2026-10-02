@@ -3,6 +3,7 @@
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
+use plymouth_3dboot::io::obj::ObjLoadError;
 use plymouth_3dboot::io::{ResolveError, ResourceResolver};
 use plymouth_3dboot::math::Vec3;
 use plymouth_3dboot::{Format, LoadError, Model};
@@ -68,6 +69,12 @@ impl ResourceResolver for CallbackResolver {
         if len == 0 {
             return Ok(Vec::new());
         }
+        if len > isize::MAX as usize {
+            return Err(ResolveError::Io {
+                name: name.to_owned(),
+                message: format!("resolver returned an impossible length {len}"),
+            });
+        }
         if data.is_null() {
             return Err(ResolveError::Io {
                 name: name.to_owned(),
@@ -83,7 +90,7 @@ impl ResourceResolver for CallbackResolver {
 fn load_failure(e: &LoadError) -> Failure {
     let status = match e {
         LoadError::UnsupportedFormat(_) => p3b_status::UnsupportedFormat,
-        LoadError::Io { .. } => p3b_status::Io,
+        LoadError::Io { .. } | LoadError::Obj(ObjLoadError::Resolve(_)) => p3b_status::Io,
         LoadError::Utf8 => p3b_status::InvalidUtf8,
         _ => p3b_status::Parse,
     };

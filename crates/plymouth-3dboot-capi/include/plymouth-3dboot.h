@@ -20,6 +20,11 @@
 // (matches the shared library's major version).
 #define P3B_ABI_VERSION 0
 
+// Largest renderer width or height. Colour plus depth take 8 bytes per
+// pixel, so 8192 x 8192 needs 512 MiB; allocation failure would abort the
+// host process, so sizes are bounded well below the core library's limit.
+#define P3B_MAX_SIZE 8192
+
 // Result of a `p3b_*` call. On anything but `P3B_STATUS_OK`,
 // `p3b_last_error()` describes the problem.
 typedef enum p3b_status {
@@ -78,8 +83,9 @@ typedef struct p3b_render_options {
   p3b_shading shading;
   // Background colour as R, G, B, A bytes (straight alpha).
   uint8_t background[4];
-  // Whether back faces are culled (double-sided materials never are).
-  bool cull_back_faces;
+  // Non-zero to cull back faces (double-sided materials never are). An
+  // integer rather than `bool`, so that any byte value is valid.
+  uint8_t cull_back_faces;
   // Clip playback wrap mode.
   p3b_wrap wrap;
   // Camera mode.

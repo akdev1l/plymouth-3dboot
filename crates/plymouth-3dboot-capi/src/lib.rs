@@ -2,9 +2,15 @@
 //! C API for `plymouth-3dboot`, built as `libplymouth_3dboot` by cargo-c.
 
 #![allow(non_camel_case_types)] // C naming for the exported types
+
 //!
 //! All symbols are prefixed `p3b_`. See `docs/c-api.md` for ownership,
 //! threading and error-handling rules.
+
+// Panics are caught at the C boundary (`ffi_guard`); with panic=abort an
+// internal bug would instead kill the host process (e.g. plymouthd).
+#[cfg(panic = "abort")]
+compile_error!("plymouth-3dboot-capi requires panic=unwind so panics can be contained");
 
 mod error;
 mod model;

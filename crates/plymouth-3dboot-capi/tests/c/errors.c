@@ -43,6 +43,19 @@ int main(int argc, char **argv) {
     p3b_render_options options = p3b_render_options_default();
     options.shading = 42;
     CHECK_STATUS(p3b_renderer_new(model, SIZE_MAX, 16, 16, &options, &renderer), P3B_STATUS_INVALID_ARGUMENT);
+    options = p3b_render_options_default();
+    options.cull_back_faces = 0xff; /* any non-zero byte means true */
+    CHECK_STATUS(p3b_renderer_new(model, SIZE_MAX, 16, 16, &options, &renderer), P3B_STATUS_OK);
+    p3b_renderer_free(renderer);
+    CHECK_STATUS(p3b_renderer_new(model, SIZE_MAX, P3B_MAX_SIZE + 1, 16, NULL, &renderer), P3B_STATUS_INVALID_ARGUMENT);
+    CHECK_STATUS(p3b_renderer_new(model, SIZE_MAX, 16, 16, NULL, &renderer), P3B_STATUS_OK);
+    static uint8_t probe[16 * 16 * 4];
+    CHECK_STATUS(p3b_render_frame(renderer, 0, probe, SIZE_MAX, SIZE_MAX / 4, P3B_PIXEL_FORMAT_RGBA8888), P3B_STATUS_INVALID_ARGUMENT);
+    /* An oversized dst_len is fine: only the needed bytes are touched. */
+    CHECK_STATUS(p3b_render_frame(renderer, 0, probe, SIZE_MAX, 64, P3B_PIXEL_FORMAT_RGBA8888), P3B_STATUS_OK);
+    p3b_renderer_free(renderer);
+    options.shading = 42;
+    CHECK_STATUS(p3b_renderer_new(model, SIZE_MAX, 16, 16, &options, &renderer), P3B_STATUS_INVALID_ARGUMENT);
     CHECK_STATUS(p3b_renderer_new(model, SIZE_MAX, 16, 16, NULL, &renderer), P3B_STATUS_OK);
 
     static uint8_t buf[16 * 16 * 4];
