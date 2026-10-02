@@ -19,6 +19,10 @@ pub(crate) struct Geometry {
     pub(crate) symbols: Vec<String>,
 }
 
+/// Largest accepted `<input offset>`: real files use a handful of inputs;
+/// the limit keeps per-corner tuple sizes (and arithmetic) small.
+const MAX_INPUT_OFFSET: usize = 64;
+
 /// One input of a primitive: where its index sits in each `<p>` tuple.
 #[derive(Clone, Debug)]
 struct Input {
@@ -45,9 +49,17 @@ fn read_source(doc: &Document<'_>, uri: &str, width: usize) -> Result<Vec<Vec<f3
     let count = parse("count", 0)?;
     let stride = parse("stride", 1)?;
     let offset = parse("offset", 0)?;
-    if stride < width || offset + count.saturating_sub(1) * stride + width > values.len() {
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    // End of the last element, computed without overflow (hostile counts).
+    let end = (count - 1)
+        .checked_mul(stride)
+        .and_then(|v| v.checked_add(offset))
+        .and_then(|v| v.checked_add(width));
+    if stride < width || end.is_none_or(|end| end > values.len()) {
         return Err(ColladaError::Count {
-            expected: offset + count * stride,
+            expected: end.unwrap_or(usize::MAX),
             actual: values.len(),
             line: doc.line(accessor),
         });
@@ -70,12 +82,14 @@ fn inputs(doc: &Document<'_>, primitive: Node<'_, '_>) -> Result<Vec<Input>, Col
         .map(|i| {
             Ok(Input {
                 semantic: attr(doc, i, "semantic")?.to_owned(),
-                offset: attr(doc, i, "offset")?.parse().map_err(|_| {
-                    ColladaError::InvalidNumber {
+                offset: attr(doc, i, "offset")?
+                    .parse()
+                    .ok()
+                    .filter(|&o| o <= MAX_INPUT_OFFSET)
+                    .ok_or_else(|| ColladaError::InvalidNumber {
                         text: i.attribute("offset").unwrap_or("").to_owned(),
                         line: doc.line(i),
-                    }
-                })?,
+                    })?,
                 set: i.attribute("set").and_then(|s| s.parse().ok()).unwrap_or(0),
                 source: attr(doc, i, "source")?.to_owned(),
             })
@@ -129,7 +143,9 @@ pub(crate) fn parse_geometry(
 
     let mut normals: Vec<Vec3> = Vec::new();
     let mut uvs: Vec<Vec2> = Vec::new();
-    let mut loaded: HashMap<String, (usize, &'static str)> = HashMap::new(); // source -> (base index, kind)
+    // (source, kind) -> base index in `normals` / `uvs`. Keyed by kind too,
+    // since one source may serve as both NORMAL and TEXCOORD.
+    let mut loaded: HashMap<(String, &'static str), usize> = HashMap::new();
     let mut symbols: Vec<String> = Vec::new();
     let mut groups: Vec<(usize, Vec<[Corner; 3]>)> = Vec::new();
 
@@ -162,7 +178,8 @@ pub(crate) fn parse_geometry(
                        kind: &'static str|
          -> Result<Option<(usize, usize)>, ColladaError> {
             let Some(input) = input else { return Ok(None) };
-            if !loaded.contains_key(&input.source) {
+            let key = (input.source.clone(), kind);
+            if !loaded.contains_key(&key) {
                 let data = read_source(doc, &input.source, width)?;
                 let base = if kind == "normal" {
                     normals.len()
@@ -174,9 +191,9 @@ pub(crate) fn parse_geometry(
                 } else {
                     uvs.extend(vec2s(data));
                 }
-                loaded.insert(input.source.clone(), (base, kind));
+                loaded.insert(key.clone(), base);
             }
-            Ok(Some((input.offset, loaded[&input.source].0)))
+            Ok(Some((input.offset, loaded[&key])))
         };
         let normal_input = own(find("NORMAL"), 3, "normal")?;
         let uv_input = own(find("TEXCOORD"), 2, "uv")?;
@@ -215,14 +232,14 @@ pub(crate) fn parse_geometry(
                 let mut start = 0;
                 let mut out = Vec::with_capacity(vcount.len());
                 for n in vcount {
-                    let end = start + n * stride;
-                    if end > all.len() {
+                    let end = n.checked_mul(stride).and_then(|len| len.checked_add(start));
+                    let Some(end) = end.filter(|&end| end <= all.len()) else {
                         return Err(ColladaError::Count {
-                            expected: end,
+                            expected: end.unwrap_or(usize::MAX),
                             actual: all.len(),
                             line: doc.line(primitive),
                         });
-                    }
+                    };
                     out.push(all[start..end].to_vec());
                     start = end;
                 }
@@ -242,7 +259,11 @@ pub(crate) fn parse_geometry(
             }
             let corner = |k: usize| -> Corner {
                 let t = &poly[k * stride..][..stride];
-                let at = |o: (usize, usize)| t[o.0] + u32::try_from(o.1).unwrap_or(u32::MAX);
+                // Overflow saturates to u32::MAX, which the range check
+                // below reports as out of range.
+                let at = |o: (usize, usize)| {
+                    t[o.0].saturating_add(u32::try_from(o.1).unwrap_or(u32::MAX))
+                };
                 Corner {
                     vertex: t[vertex_input.offset],
                     normal: normal_input.map(at),
@@ -458,6 +479,53 @@ mod tests {
             parse(&dangling).is_ok(),
             "the VERTEX input names <vertices>, which is resolved separately"
         );
+    }
+
+    #[test]
+    fn hostile_numbers_are_errors_not_panics() {
+        // Huge offset (would overflow the tuple stride).
+        let huge_offset = wrap(
+            r##"<triangles count="1"><input semantic="VERTEX" source="#v" offset="18446744073709551615"/><p>0 1 2</p></triangles>"##,
+        );
+        assert!(matches!(
+            parse(&huge_offset),
+            Err(ColladaError::InvalidNumber { .. })
+        ));
+        // vcount whose product with the stride overflows.
+        let huge_vcount = wrap(
+            r##"<polylist count="2"><input semantic="VERTEX" source="#v" offset="0"/><input semantic="NORMAL" source="#nrm" offset="1"/><vcount>3 18446744073709551615</vcount><p>0 0 1 0 2 0</p></polylist>"##,
+        );
+        // Out of range for usize on 32-bit targets (InvalidNumber), or
+        // overflowing on 64-bit ones (Count): an error either way.
+        assert!(parse(&huge_vcount).is_err());
+        // Accessor count * stride overflowing to a small number.
+        let doc = wrap(r##"<triangles count="1"><input semantic="VERTEX" source="#v" offset="0"/><p>0 1 2</p></triangles>"##)
+            .replace(r##"<accessor source="#pos-a" count="4" stride="3"/>"##, r##"<accessor source="#pos-a" count="4611686018427387905" stride="4"/>"##);
+        // Out of range for usize on 32-bit targets (InvalidNumber), or
+        // overflowing on 64-bit ones (Count): an error either way.
+        assert!(parse(&doc).is_err());
+        // Attribute index + base offset overflowing u32: two normal sources,
+        // the second based at 2, indexed with u32::MAX.
+        let wrapped = wrap(r##"<triangles count="1"><input semantic="VERTEX" source="#v" offset="0"/><input semantic="NORMAL" source="#nrm" offset="1"/><p>0 0 1 0 2 0</p></triangles>
+            <triangles count="1"><input semantic="VERTEX" source="#v" offset="0"/><input semantic="NORMAL" source="#nrm2" offset="1"/><p>0 4294967295 1 0 2 0</p></triangles>"##)
+            .replace("<vertices", r##"<source id="nrm2"><float_array id="nrm2-a" count="3">1 0 0</float_array><technique_common><accessor source="#nrm2-a" count="1" stride="3"/></technique_common></source><vertices"##);
+        assert!(
+            matches!(
+                parse(&wrapped),
+                Err(ColladaError::IndexOutOfRange { what: "normal", .. })
+            ),
+            "{:?}",
+            parse(&wrapped)
+        );
+    }
+
+    #[test]
+    fn one_source_can_serve_as_normal_and_texcoord() {
+        let g = parse(&wrap(r##"<triangles count="1"><input semantic="VERTEX" source="#v" offset="0"/><input semantic="NORMAL" source="#nrm" offset="1"/><input semantic="TEXCOORD" source="#nrm" offset="1"/><p>0 0 1 0 2 1</p></triangles>"##)).unwrap().unwrap();
+        // The UVs are the first two components of the same data.
+        assert_eq!(g.mesh.uvs().unwrap()[2], Vec2::new(0.0, 0.0));
+        assert_eq!(g.mesh.uvs().unwrap().len(), g.mesh.positions().len());
+        assert_eq!(g.mesh.normals().unwrap()[2], Vec3::NEG_Z);
     }
 
     #[test]

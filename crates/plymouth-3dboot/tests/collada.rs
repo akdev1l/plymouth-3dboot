@@ -134,6 +134,26 @@ fn cyclic_instance_nodes_terminate() {
 }
 
 #[test]
+fn exponential_instance_node_fan_out_is_rejected_quickly() {
+    // Each level instances the next one twice: 2^40 nodes if expanded.
+    let mut nodes = String::new();
+    for level in 0..40 {
+        nodes.push_str(&format!(r##"<node id="n{level}"><instance_node url="#n{next}"/><instance_node url="#n{next}"/></node>"##, next = level + 1));
+    }
+    nodes.push_str(r#"<node id="n40"/>"#);
+    let text = format!(
+        r##"<COLLADA><library_nodes>{nodes}</library_nodes><library_visual_scenes><visual_scene id="vs"><node><instance_node url="#n0"/></node></visual_scene></library_visual_scenes><scene><instance_visual_scene url="#vs"/></scene></COLLADA>"##
+    );
+    let start = std::time::Instant::now();
+    let err = load_collada(&text, &MemResolver::new(), &ColladaOptions::default()).unwrap_err();
+    assert!(
+        matches!(err, plymouth_3dboot::io::collada::ColladaError::TooLarge(_)),
+        "{err}"
+    );
+    assert!(start.elapsed().as_secs() < 5);
+}
+
+#[test]
 fn errors_are_reported() {
     assert!(
         load_collada(

@@ -93,6 +93,10 @@ pub enum ColladaError {
         /// Line of the parent element.
         line: u32,
     },
+    /// The document would produce more nodes or vertices than allowed
+    /// (protects against exponential `instance_node` expansion).
+    #[error("document too large: {0}")]
+    TooLarge(String),
     /// A `#id` reference does not match any element.
     #[error("unresolved reference {0}")]
     UnresolvedUri(String),

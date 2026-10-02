@@ -14,8 +14,13 @@ use crate::scene::{
     LocalTransform, MaterialId, Mesh, Node, NodeId, Scene, Submesh, TransformOp, TransformOpKind,
 };
 
-/// Deepest `<instance_node>` nesting followed (guards against cycles).
+/// Deepest node nesting followed.
 const MAX_DEPTH: usize = 64;
+/// Most scene nodes a document may produce (`<instance_node>` can multiply
+/// a small document exponentially).
+pub(crate) const MAX_NODES: usize = 100_000;
+/// Most vertices over all instanced meshes.
+pub(crate) const MAX_VERTICES: usize = 10_000_000;
 
 /// The document's up axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +122,10 @@ struct Builder<'d, 'input> {
     doc: &'d Document<'input>,
     scene: Scene,
     nodes: NodeMap,
+    /// XML nodes being expanded (to reject `instance_node` cycles).
+    expanding: Vec<roxmltree::NodeId>,
+    /// Vertices of all mesh instances so far.
+    vertices: usize,
     geometries: HashMap<String, Option<Geometry>>,
     materials: HashMap<String, usize>,
     default_material: Option<usize>,
@@ -197,9 +206,33 @@ impl Builder<'_, '_> {
         parent: Option<NodeId>,
         depth: usize,
     ) -> Result<(), ColladaError> {
+        if self.expanding.contains(&node.id()) {
+            self.warnings.push(format!(
+                "line {}: cyclic instance_node reference; skipped",
+                self.doc.line(node)
+            ));
+            return Ok(());
+        }
+        if self.scene.nodes().len() >= MAX_NODES {
+            return Err(ColladaError::TooLarge(format!(
+                "more than {MAX_NODES} nodes"
+            )));
+        }
+        self.expanding.push(node.id());
+        let result = self.node_contents(node, parent, depth);
+        self.expanding.pop();
+        result
+    }
+
+    fn node_contents(
+        &mut self,
+        node: XmlNode<'_, '_>,
+        parent: Option<NodeId>,
+        depth: usize,
+    ) -> Result<(), ColladaError> {
         if depth > MAX_DEPTH {
             self.warnings.push(format!(
-                "line {}: node nesting deeper than {MAX_DEPTH} (cyclic instance_node?); skipped",
+                "line {}: node nesting deeper than {MAX_DEPTH}; skipped",
                 self.doc.line(node)
             ));
             return Ok(());
@@ -221,6 +254,12 @@ impl Builder<'_, '_> {
             match e.tag_name().name() {
                 "instance_geometry" => {
                     if let Some(mesh) = self.instance_geometry(e)? {
+                        self.vertices = self.vertices.saturating_add(mesh.positions().len());
+                        if self.vertices > MAX_VERTICES {
+                            return Err(ColladaError::TooLarge(format!(
+                                "more than {MAX_VERTICES} instanced vertices"
+                            )));
+                        }
                         let mesh = self.scene.add_mesh(mesh);
                         let holder =
                             Node::new(format!("{name}#geometry"), LocalTransform::default())
@@ -263,6 +302,8 @@ pub(crate) fn build_scene(
         doc,
         scene: Scene::new(),
         nodes: HashMap::new(),
+        expanding: Vec::new(),
+        vertices: 0,
         geometries: HashMap::new(),
         materials: HashMap::new(),
         default_material: None,
