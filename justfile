@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c test-plymouth plymouth-install browser-smoke deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c test-plymouth plymouth-install budgets browser-smoke deny
 
 # Format all code.
 fmt:
@@ -114,6 +114,20 @@ test-plymouth: plymouth
     meson test -C target/plymouth --print-errorlogs \
         --wrapper "valgrind --quiet --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite,indirect --suppressions=$PWD/plymouth/tests/valgrind.supp"
 
+
+# Check size and speed budgets of the release C library (docs/perf.md).
+budgets:
+    cargo cbuild --locked --release -p plymouth-3dboot-capi --target-dir target/capi
+    rm -rf target/tmp/budget && mkdir -p target/tmp/budget
+    cp target/capi/x86_64-unknown-linux-gnu/release/libplymouth_3dboot.so target/tmp/budget/
+    ln -sf libplymouth_3dboot.so target/tmp/budget/libplymouth_3dboot.so.0
+    cc -O2 -std=c11 crates/plymouth-3dboot-capi/examples/budget.c -I target/capi/x86_64-unknown-linux-gnu/release/include \
+        -L target/tmp/budget -lplymouth_3dboot -Wl,-rpath,"$PWD/target/tmp/budget" -o target/tmp/budget/budget
+    strip -o target/tmp/budget/stripped.so target/tmp/budget/libplymouth_3dboot.so
+    @size=$(stat -c %s target/tmp/budget/stripped.so); echo "stripped library: $size bytes"; \
+        [ "$size" -lt 2097152 ] || { echo "over the 2 MiB size budget"; exit 1; }
+    @out=$(target/tmp/budget/budget tests/fixtures/n64_logo/n64_logo_spin.dae 1920 1080 20); echo "1080p: $out"; \
+        echo "$out" | awk -F'[= ]' '{ if ($2 >= 500 || $4 >= 200) { print "over the 1080p time budget"; exit 1 } }'
 
 # Regenerate the committed C header after an intended API change.
 capi-header:
