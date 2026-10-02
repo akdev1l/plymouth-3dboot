@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Checks the C library built by `cargo cbuild` (run via `just capi`):
-# artifacts exist, the soname carries the ABI major version, and only
-# `p3b_*` symbols are exported.
+# artifacts exist, the soname carries the ABI major version, only `p3b_*`
+# symbols are exported, and the generated header matches the committed one.
 set -euo pipefail
 
 dir="${1:?usage: check-capi.sh BUILD_DIR}"
@@ -18,5 +18,11 @@ exported="$(nm -D --defined-only "${dir}/libplymouth_3dboot.so" | awk '$2 ~ /^[T
 foreign="$(grep -v '^p3b_' <<<"${exported}" || true)"
 [[ -z "${foreign}" ]] || { echo "unexpected exported symbols:" >&2; echo "${foreign}" >&2; exit 1; }
 [[ -n "${exported}" ]] || { echo "no symbols exported" >&2; exit 1; }
+
+committed="$(dirname "${BASH_SOURCE[0]}")/../crates/plymouth-3dboot-capi/include/plymouth-3dboot.h"
+if ! diff -u "${committed}" "${dir}/include/plymouth-3dboot.h" >&2; then
+    echo "the generated header differs from the committed one: review the ABI change and run 'just capi-header'" >&2
+    exit 1
+fi
 
 echo "C library OK: ${soname}, $(wc -l <<<"${exported}") p3b_* symbols"
