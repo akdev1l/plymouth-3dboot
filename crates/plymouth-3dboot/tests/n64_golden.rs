@@ -147,3 +147,26 @@ fn explore_views() {
         .unwrap();
     }
 }
+
+/// Supersampling anti-aliasing softens the edges of the unlit logo.
+#[test]
+fn obj_unlit_antialiased() {
+    use plymouth_3dboot::{FrameSettings, Model, WrapMode};
+    let model = Model {
+        scene: load_obj_scene(),
+        clips: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let settings = FrameSettings {
+        antialias: 4,
+        ..FrameSettings::new(128, 128)
+    };
+    let mut renderer = model.renderer(None, WrapMode::Loop, settings).unwrap();
+    let image = renderer.render_at(0.0).unwrap();
+    let palette: BTreeSet<[u8; 4]> = image.pixels().iter().map(|p| p.to_array()).collect();
+    assert!(
+        palette.len() > 5,
+        "edges blend the four colours and the background"
+    );
+    golden!().assert("n64_obj_unlit_aa4", image, Tolerance::EXACT);
+}

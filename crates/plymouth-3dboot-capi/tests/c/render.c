@@ -67,6 +67,13 @@ int main(int argc, char **argv) {
     CHECK_STATUS(p3b_render_frame(renderer, 1.8, b, sizeof b, STRIDE, P3B_PIXEL_FORMAT_RGBA8888), P3B_STATUS_OK);
     CHECK(memcmp(a, b, sizeof a) != 0);
 
+    /* Anti-aliasing keeps the size and adds intermediate edge colours. */
+    p3b_renderer_free(renderer);
+    options.antialias = 4;
+    CHECK_STATUS(p3b_renderer_new(model, 0, W, H, &options, &renderer), P3B_STATUS_OK);
+    CHECK_STATUS(p3b_render_frame(renderer, 1.0, b, sizeof b, STRIDE, P3B_PIXEL_FORMAT_RGBA8888), P3B_STATUS_OK);
+    CHECK(memcmp(a, b, sizeof a) != 0);
+
     p3b_renderer_free(renderer);
     p3b_model_free(model);
     puts("render: ok");

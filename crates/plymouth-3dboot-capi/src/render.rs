@@ -101,6 +101,9 @@ pub struct p3b_render_options {
     pub z_near: f32,
     /// See `z_near`.
     pub z_far: f32,
+    /// Supersampling anti-aliasing: samples per axis, 1 (off) to 8. Cost
+    /// grows with its square.
+    pub antialias: u8,
 }
 
 /// The default options: unlit shading on opaque black, back-face culling,
@@ -121,6 +124,7 @@ pub extern "C" fn p3b_render_options_default() -> p3b_render_options {
         fov_y: 0.7,
         z_near: 0.1,
         z_far: 100.0,
+        antialias: 1,
     }
 }
 
@@ -187,6 +191,7 @@ fn settings(width: u32, height: u32, o: &p3b_render_options) -> Result<FrameSett
             CullMode::None
         },
         background: Rgba8::from(o.background),
+        antialias: u32::from(o.antialias),
         ..FrameSettings::new(width, height)
     })
 }
@@ -591,6 +596,14 @@ mod tests {
                 },
                 p3b_render_options {
                     camera_mode: 9,
+                    ..p3b_render_options_default()
+                },
+                p3b_render_options {
+                    antialias: 0,
+                    ..p3b_render_options_default()
+                },
+                p3b_render_options {
+                    antialias: 9,
                     ..p3b_render_options_default()
                 },
             ] {

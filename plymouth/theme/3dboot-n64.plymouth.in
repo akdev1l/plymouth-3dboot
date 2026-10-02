@@ -9,3 +9,4 @@ TurntablePeriod=6
 Shading=unlit
 BackgroundColor=000000
 FramesPerSecond=30
+Antialias=1

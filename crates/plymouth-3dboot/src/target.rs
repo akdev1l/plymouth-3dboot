@@ -230,6 +230,79 @@ impl Framebuffer {
     }
 }
 
+/// sRGB-encoded byte → linear value.
+fn decode_table() -> &'static [f32; 256] {
+    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        std::array::from_fn(|i| {
+            crate::color::srgb_to_linear(f32::from(u8::try_from(i).unwrap_or(u8::MAX)) / 255.0)
+        })
+    })
+}
+
+/// Linear values at which the sRGB encoding rounds up to the next byte:
+/// `thresholds[k]` separates byte `k` from `k + 1`.
+fn encode_thresholds() -> &'static [f32; 255] {
+    static TABLE: std::sync::OnceLock<[f32; 255]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        std::array::from_fn(|k| crate::color::srgb_to_linear((k as f32 + 0.5) / 255.0))
+    })
+}
+
+/// Encodes a linear value as an sRGB byte (rounding like
+/// [`crate::color::LinearRgba::to_srgb8`], via table lookup).
+fn encode_srgb(linear: f32) -> u8 {
+    let t = encode_thresholds();
+    // Number of thresholds below the value = the encoded byte.
+    let k = t.partition_point(|&threshold| threshold <= linear);
+    u8::try_from(k).unwrap_or(u8::MAX)
+}
+
+/// Downsamples `src` by `factor` in each direction into `dst` (which must be
+/// `src` size / `factor`), averaging each `factor × factor` block in linear
+/// light (alpha averaged linearly). This is the resolve step of
+/// supersampling anti-aliasing.
+///
+/// # Panics
+///
+/// Panics if the sizes do not match.
+pub fn downsample(src: &ColorBuffer, factor: u32, dst: &mut ColorBuffer) {
+    assert!(factor >= 1, "factor must be at least 1");
+    assert_eq!(
+        (src.width(), src.height()),
+        (dst.width() * factor, dst.height() * factor),
+        "size mismatch"
+    );
+    if factor == 1 {
+        dst.pixels_mut().copy_from_slice(src.pixels());
+        return;
+    }
+    let decode = decode_table();
+    let (f, sw) = (factor as usize, src.width() as usize);
+    #[allow(clippy::cast_precision_loss)]
+    let inv = 1.0 / (f * f) as f32;
+    let dw = dst.width() as usize;
+    for (dy, row) in dst.pixels_mut().chunks_exact_mut(dw.max(1)).enumerate() {
+        for (dx, out) in row.iter_mut().enumerate() {
+            let mut sum = [0.0f32; 4];
+            for sy in dy * f..(dy + 1) * f {
+                for p in &src.pixels()[sy * sw + dx * f..][..f] {
+                    sum[0] += decode[usize::from(p.r)];
+                    sum[1] += decode[usize::from(p.g)];
+                    sum[2] += decode[usize::from(p.b)];
+                    sum[3] += f32::from(p.a);
+                }
+            }
+            *out = Rgba8::new(
+                encode_srgb(sum[0] * inv),
+                encode_srgb(sum[1] * inv),
+                encode_srgb(sum[2] * inv),
+                crate::color::unorm8(sum[3] * inv / 255.0),
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,6 +368,47 @@ mod tests {
         assert!(fb.color.pixels().is_empty());
         assert!(fb.color.as_bytes().is_empty());
         assert_eq!(fb.color.get(0, 0), None);
+    }
+
+    #[test]
+    fn table_encoding_matches_the_reference() {
+        for v in 0..=255u8 {
+            assert_eq!(
+                encode_srgb(decode_table()[usize::from(v)]),
+                v,
+                "byte {v} round-trips"
+            );
+        }
+        for i in 0..=10_000 {
+            let linear = i as f32 / 10_000.0;
+            let reference = crate::color::LinearRgba::rgb(linear, 0.0, 0.0).to_srgb8().r;
+            assert!(
+                encode_srgb(linear).abs_diff(reference) <= 1,
+                "{linear}: {} vs {reference}",
+                encode_srgb(linear)
+            );
+        }
+        assert_eq!(encode_srgb(-1.0), 0);
+        assert_eq!(encode_srgb(2.0), 255);
+    }
+
+    #[test]
+    fn downsampling_averages_in_linear_light() {
+        let mut src = ColorBuffer::new(4, 2, Rgba8::new(10, 20, 30, 255)).unwrap();
+        // Left 2x2 block: half black, half white (alpha 0 and 255).
+        *src.get_mut(0, 0).unwrap() = Rgba8::new(0, 0, 0, 0);
+        *src.get_mut(1, 0).unwrap() = Rgba8::new(255, 255, 255, 255);
+        *src.get_mut(0, 1).unwrap() = Rgba8::new(0, 0, 0, 0);
+        *src.get_mut(1, 1).unwrap() = Rgba8::new(255, 255, 255, 255);
+        let mut dst = ColorBuffer::new(2, 1, Rgba8::TRANSPARENT).unwrap();
+        downsample(&src, 2, &mut dst);
+        // 50% linear is sRGB 188, not 128.
+        assert_eq!(dst.get(0, 0), Some(Rgba8::new(188, 188, 188, 128)));
+        // A uniform block is unchanged.
+        assert_eq!(dst.get(1, 0), Some(Rgba8::new(10, 20, 30, 255)));
+        let mut same = ColorBuffer::new(4, 2, Rgba8::BLACK).unwrap();
+        downsample(&src, 1, &mut same);
+        assert_eq!(same, src);
     }
 
     #[test]

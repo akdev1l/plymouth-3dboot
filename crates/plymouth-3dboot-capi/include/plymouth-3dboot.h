@@ -105,6 +105,9 @@ typedef struct p3b_render_options {
   float z_near;
   // See `z_near`.
   float z_far;
+  // Supersampling anti-aliasing: samples per axis, 1 (off) to 8. Cost
+  // grows with its square.
+  uint8_t antialias;
 } p3b_render_options;
 
 // Layout of the pixels written by `p3b_render_frame` (`P3B_PIXEL_FORMAT_*`).

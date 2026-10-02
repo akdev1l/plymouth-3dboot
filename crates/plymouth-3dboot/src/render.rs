@@ -47,7 +47,13 @@ pub struct FrameSettings {
     pub cull: CullMode,
     /// Background colour.
     pub background: Rgba8,
+    /// Supersampling anti-aliasing: samples per axis (1 = off, up to
+    /// [`MAX_ANTIALIAS`]). Rendering cost grows with its square.
+    pub antialias: u32,
 }
+
+/// Largest supported [`FrameSettings::antialias`].
+pub const MAX_ANTIALIAS: u32 = 8;
 
 impl FrameSettings {
     /// Settings for a `width × height` image framing the scene from the
@@ -66,6 +72,7 @@ impl FrameSettings {
             lighting: Lighting::default(),
             cull: CullMode::Back,
             background: Rgba8::BLACK,
+            antialias: 1,
         }
     }
 }
@@ -77,6 +84,9 @@ pub enum RenderError {
     /// The image size is not supported.
     #[error(transparent)]
     Size(#[from] SizeError),
+    /// [`FrameSettings::antialias`] is outside `1..=MAX_ANTIALIAS`.
+    #[error("antialias factor {0} is outside 1..={MAX_ANTIALIAS}")]
+    Antialias(u32),
     /// `CameraSource::Node` names a node without a camera.
     #[error("node {0:?} has no camera")]
     NoCamera(NodeId),
@@ -145,7 +155,10 @@ pub struct AnimationRenderer<'a> {
     /// so that it neither jitters nor loses the moving model.
     framed: Option<Camera>,
     renderer: Renderer,
+    /// Render target, `antialias` times the output size per axis.
     target: Framebuffer,
+    /// The downsampled image when anti-aliasing.
+    resolved: Option<ColorBuffer>,
 }
 
 impl<'a> AnimationRenderer<'a> {
@@ -161,7 +174,24 @@ impl<'a> AnimationRenderer<'a> {
         clip: Option<(&'a Clip, WrapMode)>,
         settings: FrameSettings,
     ) -> Result<Self, RenderError> {
-        let target = Framebuffer::new(settings.width, settings.height, settings.background)?;
+        let k = settings.antialias;
+        if !(1..=MAX_ANTIALIAS).contains(&k) {
+            return Err(RenderError::Antialias(k));
+        }
+        let scaled = |v: u32| {
+            v.checked_mul(k).ok_or(SizeError {
+                width: settings.width,
+                height: settings.height,
+            })
+        };
+        let target = Framebuffer::new(
+            scaled(settings.width)?,
+            scaled(settings.height)?,
+            settings.background,
+        )?;
+        let resolved = (k > 1)
+            .then(|| ColorBuffer::new(settings.width, settings.height, settings.background))
+            .transpose()?;
         if let CameraSource::Node(node) = settings.camera
             && scene.nodes().get(node.0).is_none_or(|n| n.camera.is_none())
         {
@@ -180,6 +210,7 @@ impl<'a> AnimationRenderer<'a> {
             _ => None,
         };
         Ok(Self {
+            resolved,
             scene,
             clip,
             settings,
@@ -222,7 +253,7 @@ impl<'a> AnimationRenderer<'a> {
             model: s.shading,
             materials: &self.scene.materials,
         };
-        let mut state = RenderState::new(Viewport::new(s.width, s.height));
+        let mut state = RenderState::new(Viewport::new(self.target.width(), self.target.height()));
         state.cull = s.cull;
         draw_scene(
             &mut self.renderer,
@@ -232,7 +263,13 @@ impl<'a> AnimationRenderer<'a> {
             self.scene,
             &world,
         )?;
-        Ok(&self.target.color)
+        match &mut self.resolved {
+            Some(out) => {
+                crate::target::downsample(&self.target.color, s.antialias, out);
+                Ok(out)
+            }
+            None => Ok(&self.target.color),
+        }
     }
 
     /// Renders `count` frames at `fps` starting at `start` seconds (no
@@ -401,5 +438,58 @@ mod tests {
             assert!(visible > 4, "t = {t}: the cube left the frame");
         }
         assert_eq!(r.frames(0.0, 0.0, 10).count(), 0, "fps must be positive");
+    }
+
+    #[test]
+    fn antialiasing_softens_edges_only() {
+        let (scene, _) = spinning_cube();
+        let render = |antialias| {
+            let mut r = AnimationRenderer::new(
+                &scene,
+                None,
+                FrameSettings {
+                    antialias,
+                    ..FrameSettings::new(48, 48)
+                },
+            )
+            .unwrap();
+            r.render_at(0.0).unwrap().clone()
+        };
+        let (hard, soft) = (render(1), render(4));
+        let distinct = |img: &ColorBuffer| {
+            img.pixels()
+                .iter()
+                .map(|p| p.to_array())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        };
+        assert_eq!(distinct(&hard), 2, "unlit white cube on black");
+        assert!(distinct(&soft) > 4, "edges get intermediate values");
+        // Away from edges the images agree.
+        assert_eq!(hard.get(24, 24), soft.get(24, 24));
+        assert_eq!(hard.get(0, 0), soft.get(0, 0));
+        assert_eq!(
+            AnimationRenderer::new(
+                &scene,
+                None,
+                FrameSettings {
+                    antialias: 0,
+                    ..FrameSettings::new(8, 8)
+                }
+            )
+            .unwrap_err(),
+            RenderError::Antialias(0)
+        );
+        assert!(matches!(
+            AnimationRenderer::new(
+                &scene,
+                None,
+                FrameSettings {
+                    antialias: 8,
+                    ..FrameSettings::new(4096, 8)
+                }
+            ),
+            Err(RenderError::Size(_))
+        ));
     }
 }
