@@ -3,6 +3,7 @@
 resolver = "3"
 members = [
     "crates/plymouth-3dboot",
+    "crates/plymouth-3dboot-capi",
     "crates/plymouth-3dboot-sdl",
     "crates/plymouth-3dboot-testutil",
     "apps/viewer",

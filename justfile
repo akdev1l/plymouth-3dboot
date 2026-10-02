@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example browser-smoke deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi browser-smoke deny
 
 # Format all code.
 fmt:
@@ -79,6 +79,11 @@ smoke-example:
     cargo run --locked -q -p plymouth-3dboot --example animate -- tests/fixtures/n64_logo/n64_logo_spin.dae --out target/tmp/animate/spin.gif --frames 4 --size 64x64
     cargo run --locked -q -p plymouth-3dboot --example animate -- tests/fixtures/n64_logo/n64_logo.obj --out target/tmp/animate/frames --frames 2 --size 32x32 --shading lambert
     test -s target/tmp/animate/spin.gif && test -s target/tmp/animate/frames/frame0001.png
+
+# Build the C library (cargo-c) and check its artifacts and exports.
+capi:
+    cargo cbuild --locked -p plymouth-3dboot-capi --target-dir target/capi
+    scripts/check-capi.sh target/capi/x86_64-unknown-linux-gnu/debug
 
 # Licence, advisory, ban and source policy (deny.toml).
 deny:

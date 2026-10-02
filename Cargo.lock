@@ -196,6 +196,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "plymouth-3dboot-capi"
+version = "0.1.0"
+dependencies = [
+ "plymouth-3dboot",
+]
+
+[[package]]
 name = "plymouth-3dboot-sdl"
 version = "0.1.0"
 dependencies = [
