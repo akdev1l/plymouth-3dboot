@@ -38,39 +38,87 @@ pub(crate) fn srgb8_decode_table() -> &'static [f32; 256] {
     })
 }
 
-/// Linear values at which the encoded byte rounds up: `thresholds[k]` is
-/// the linear value of sRGB `(k + 0.5) / 255`, separating byte `k` from
-/// `k + 1`.
-fn srgb8_thresholds() -> &'static [f32; 255] {
-    static TABLE: std::sync::OnceLock<[f32; 255]> = std::sync::OnceLock::new();
-    #[allow(clippy::cast_precision_loss)]
-    TABLE.get_or_init(|| std::array::from_fn(|k| srgb_to_linear((k as f32 + 0.5) / 255.0)))
+/// Buckets of the encode index: `[0, 1]` is split into this many equal
+/// parts.
+const ENCODE_BUCKETS: usize = 1024;
+
+/// Tables for exact sRGB encoding by lookup.
+struct EncodeTables {
+    /// `thresholds[k]`: linear value of sRGB `(k + 0.5) / 255`, separating
+    /// byte `k` from `k + 1`.
+    thresholds: [f32; 255],
+    /// `start[b]`: the encoded byte of the lowest value in bucket `b`
+    /// (thresholds at or below `b / ENCODE_BUCKETS`).
+    start: [u8; ENCODE_BUCKETS + 1],
+}
+
+impl EncodeTables {
+    fn get() -> &'static Self {
+        static TABLES: std::sync::OnceLock<EncodeTables> = std::sync::OnceLock::new();
+        TABLES.get_or_init(|| {
+            #[allow(clippy::cast_precision_loss)]
+            let thresholds: [f32; 255] =
+                std::array::from_fn(|k| srgb_to_linear((k as f32 + 0.5) / 255.0));
+            let start = std::array::from_fn(|b| {
+                #[allow(clippy::cast_precision_loss)]
+                let low = b as f32 / ENCODE_BUCKETS as f32;
+                u8::try_from(thresholds.partition_point(|&t| t <= low)).unwrap_or(u8::MAX)
+            });
+            Self { thresholds, start }
+        })
+    }
+
+    /// The nearest sRGB byte for `linear`: the number of thresholds at or
+    /// below it, found by jumping to its bucket and stepping forward (a few
+    /// steps at most, since thresholds are sparse in each bucket).
+    fn encode(&self, linear: f32) -> u8 {
+        if linear.is_nan() || linear <= 0.0 {
+            return 0;
+        }
+        if linear >= 1.0 {
+            return 255;
+        }
+        // In range, so the bucket index is within 0..ENCODE_BUCKETS.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
+        let bucket = (linear * ENCODE_BUCKETS as f32) as usize;
+        let mut k = usize::from(self.start[bucket.min(ENCODE_BUCKETS)]);
+        while k < 255 && self.thresholds[k] <= linear {
+            k += 1;
+        }
+        u8::try_from(k).unwrap_or(u8::MAX)
+    }
 }
 
 /// Encodes a linear value in `[0, 1]` as the nearest sRGB byte (values
-/// outside are clamped, NaN gives 0). Uses a table of rounding thresholds
+/// outside are clamped, NaN gives 0). Uses tables of rounding thresholds
 /// instead of evaluating the transfer function, which is exact, fast and
 /// identical on every target.
 #[must_use]
 pub fn encode_srgb8(linear: f32) -> u8 {
-    if linear.is_nan() {
-        return 0;
-    }
-    let k = srgb8_thresholds().partition_point(|&threshold| threshold <= linear);
-    u8::try_from(k).unwrap_or(u8::MAX)
+    EncodeTables::get().encode(linear)
 }
 
-/// Quantizes a `[0, 1]` value to `u8`, rounding to nearest. Out-of-range
-/// values are clamped, and NaN maps to 0.
+/// Quantizes a `[0, 1]` value to `u8`, rounding to nearest (halves away from
+/// zero). Out-of-range values are clamped, and NaN maps to 0.
 #[must_use]
 pub fn unorm8(c: f32) -> u8 {
     if c.is_nan() {
         return 0;
     }
-    // The clamp keeps the rounded value within 0..=255.
+    let x = c.clamp(0.0, 1.0) * 255.0;
+    // Non-negative and at most 255: truncation is floor, and comparing the
+    // fraction rounds exactly like `f32::round` without a libm call.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let v = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
-    v
+    let floor = x as u8;
+    if x - f32::from(floor) >= 0.5 {
+        floor + 1
+    } else {
+        floor
+    }
 }
 
 /// An sRGB-encoded 8-bit colour with straight alpha, in `R, G, B, A` byte
@@ -180,10 +228,11 @@ impl LinearRgba {
     /// [`encode_srgb8`]).
     #[must_use]
     pub fn to_srgb8(self) -> Rgba8 {
+        let tables = EncodeTables::get();
         Rgba8::new(
-            encode_srgb8(self.r),
-            encode_srgb8(self.g),
-            encode_srgb8(self.b),
+            tables.encode(self.r),
+            tables.encode(self.g),
+            tables.encode(self.b),
             unorm8(self.a),
         )
     }
@@ -261,6 +310,36 @@ mod tests {
         assert_eq!(encode_srgb8(-1.0), 0);
         assert_eq!(encode_srgb8(2.0), 255);
         assert_eq!(encode_srgb8(f32::NAN), 0);
+    }
+
+    #[test]
+    fn bucketed_encoding_equals_threshold_search_and_rounding_is_exact() {
+        let t = &EncodeTables::get().thresholds;
+        for i in 0..=200_000 {
+            #[allow(clippy::cast_precision_loss)]
+            let linear = i as f32 / 200_000.0;
+            let search = u8::try_from(t.partition_point(|&th| th <= linear)).unwrap();
+            assert_eq!(encode_srgb8(linear), search, "{linear}");
+        }
+        // Exactly on thresholds and just below.
+        for &th in t {
+            assert_eq!(
+                encode_srgb8(th),
+                u8::try_from(t.partition_point(|&x| x <= th)).unwrap()
+            );
+            let below = f32::from_bits(th.to_bits() - 1);
+            assert_eq!(
+                encode_srgb8(below),
+                u8::try_from(t.partition_point(|&x| x <= below)).unwrap()
+            );
+        }
+        for i in 0..=100_000u32 {
+            #[allow(clippy::cast_precision_loss)]
+            let c = i as f32 / 100_000.0;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let reference = (c * 255.0).round() as u8;
+            assert_eq!(unorm8(c), reference, "{c}");
+        }
     }
 
     #[test]
