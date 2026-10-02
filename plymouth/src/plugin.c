@@ -14,6 +14,7 @@
 #include <ply-logger.h>
 #include <ply-pixel-buffer.h>
 #include <ply-pixel-display.h>
+#include <ply-label.h>
 #include <ply-utils.h>
 
 #include <plymouth-3dboot.h>
@@ -29,6 +30,8 @@ typedef struct view {
     uint32_t *pixels;       /* last rendered frame, width * height ARGB32 */
     unsigned long width, height;
     double rendered_time;   /* animation time of `pixels`, or -1 */
+    ply_label_t *prompt;    /* prompt and entered text */
+    ply_label_t *message;   /* display_message text */
 } view_t;
 
 struct _ply_boot_splash_plugin {
@@ -42,6 +45,9 @@ struct _ply_boot_splash_plugin {
 
     ply_event_loop_t *loop; /* set while the splash is shown */
     double start_time;      /* ply_get_timestamp() when shown */
+
+    char *prompt_text;      /* NULL when no prompt is shown */
+    char *message_text;     /* NULL when no message is shown */
 };
 
 /* Parses "RRGGBB" into options->background (opaque); false if invalid. */
@@ -145,12 +151,33 @@ static bool prepare_view(view_t *view) {
     return true;
 }
 
+/* Shows `text` centred at `y_fraction` of the display height, or hides
+ * the label for NULL. Labels need a Plymouth label plugin at run time;
+ * without one they stay invisible and the animation is unaffected. */
+static void place_label(ply_label_t *label, ply_pixel_display_t *display, const char *text, double y_fraction) {
+    if (text == NULL) {
+        ply_label_hide(label);
+        return;
+    }
+    unsigned long width = ply_pixel_display_get_width(display);
+    ply_label_set_text(label, text);
+    ply_label_set_width(label, (long) width);
+    ply_label_set_alignment(label, PLY_LABEL_ALIGN_CENTER);
+    ply_label_set_color(label, 1.0f, 1.0f, 1.0f, 1.0f);
+    long y = (long) (ply_pixel_display_get_height(display) * y_fraction);
+    ply_label_show(label, display, 0, y);
+}
+
+static void update_labels(ply_boot_splash_plugin_t *plugin) {
+    for (size_t i = 0; i < plugin->view_count; i++) {
+        view_t *view = plugin->views[i];
+        place_label(view->prompt, view->display, plugin->prompt_text, 0.75);
+        place_label(view->message, view->display, plugin->message_text, 0.88);
+    }
+}
+
 static void on_draw(void *user_data, ply_pixel_buffer_t *pixel_buffer, int x, int y, int width, int height,
                     ply_pixel_display_t *display) {
-    (void) x;
-    (void) y;
-    (void) width;
-    (void) height;
     (void) display;
     view_t *view = user_data;
     if (!prepare_view(view))
@@ -168,6 +195,8 @@ static void on_draw(void *user_data, ply_pixel_buffer_t *pixel_buffer, int x, in
     }
     ply_rectangle_t area = {.x = 0, .y = 0, .width = view->width, .height = view->height};
     ply_pixel_buffer_fill_with_argb32_data(pixel_buffer, &area, view->pixels);
+    ply_label_draw_area(view->prompt, pixel_buffer, x, y, (unsigned long) width, (unsigned long) height);
+    ply_label_draw_area(view->message, pixel_buffer, x, y, (unsigned long) width, (unsigned long) height);
 }
 
 static void redraw_all(ply_boot_splash_plugin_t *plugin) {
@@ -200,8 +229,11 @@ static void add_pixel_display(ply_boot_splash_plugin_t *plugin, ply_pixel_displa
     view->plugin = plugin;
     view->display = display;
     view->rendered_time = -1;
+    view->prompt = ply_label_new();
+    view->message = ply_label_new();
     plugin->views[plugin->view_count++] = view;
     ply_pixel_display_set_draw_handler(display, on_draw, view);
+    update_labels(plugin);
 }
 
 static void remove_pixel_display(ply_boot_splash_plugin_t *plugin, ply_pixel_display_t *display) {
@@ -211,6 +243,8 @@ static void remove_pixel_display(ply_boot_splash_plugin_t *plugin, ply_pixel_dis
             continue;
         ply_pixel_display_set_draw_handler(display, NULL, NULL);
         free_view_resources(view);
+        ply_label_free(view->prompt);
+        ply_label_free(view->message);
         free(view);
         plugin->views[i] = plugin->views[--plugin->view_count];
         return;
@@ -231,6 +265,8 @@ static void destroy_plugin(ply_boot_splash_plugin_t *plugin) {
     while (plugin->view_count > 0)
         remove_pixel_display(plugin, plugin->views[plugin->view_count - 1]->display);
     free(plugin->views);
+    free(plugin->prompt_text);
+    free(plugin->message_text);
     p3b_model_free(plugin->model); /* after the renderers */
     free(plugin);
 }
@@ -252,6 +288,61 @@ static void hide_splash_screen(ply_boot_splash_plugin_t *plugin, ply_event_loop_
     stop_animation(plugin);
 }
 
+/* Replaces *slot with a copy of `text` (NULL clears it) and redraws. */
+static void set_text(ply_boot_splash_plugin_t *plugin, char **slot, const char *text) {
+    free(*slot);
+    *slot = text != NULL ? strdup(text) : NULL;
+    update_labels(plugin);
+    redraw_all(plugin);
+}
+
+/* "prompt: entry" with the entry shown as bullets when secret. */
+static void show_prompt(ply_boot_splash_plugin_t *plugin, const char *prompt, const char *entry, size_t bullets,
+                        bool secret) {
+    static const char bullet[] = "\u2022"; /* UTF-8 "•" */
+    const char *label = prompt != NULL && prompt[0] != '\0' ? prompt : (secret ? "Password" : "");
+    size_t entry_len = secret ? bullets * (sizeof bullet - 1) : (entry != NULL ? strlen(entry) : 0);
+    char *text = malloc(strlen(label) + 2 + entry_len + 1);
+    if (text == NULL)
+        return;
+    char *end = stpcpy(text, label);
+    if (label[0] != '\0')
+        end = stpcpy(end, ": ");
+    if (secret)
+        for (size_t i = 0; i < bullets; i++)
+            end = stpcpy(end, bullet);
+    else if (entry != NULL)
+        end = stpcpy(end, entry);
+    set_text(plugin, &plugin->prompt_text, text);
+    free(text);
+}
+
+static void display_normal(ply_boot_splash_plugin_t *plugin) {
+    set_text(plugin, &plugin->prompt_text, NULL);
+}
+
+static void display_password(ply_boot_splash_plugin_t *plugin, const char *prompt, int bullets) {
+    show_prompt(plugin, prompt, NULL, bullets > 0 ? (size_t) bullets : 0, true);
+}
+
+static void display_question(ply_boot_splash_plugin_t *plugin, const char *prompt, const char *entry_text) {
+    show_prompt(plugin, prompt, entry_text, 0, false);
+}
+
+static void display_prompt(ply_boot_splash_plugin_t *plugin, const char *prompt, const char *entry_text,
+                           bool is_secret) {
+    show_prompt(plugin, prompt, entry_text, entry_text != NULL ? strlen(entry_text) : 0, is_secret);
+}
+
+static void display_message(ply_boot_splash_plugin_t *plugin, const char *message) {
+    set_text(plugin, &plugin->message_text, message);
+}
+
+static void hide_message(ply_boot_splash_plugin_t *plugin, const char *message) {
+    if (plugin->message_text != NULL && message != NULL && strcmp(plugin->message_text, message) == 0)
+        set_text(plugin, &plugin->message_text, NULL);
+}
+
 static void become_idle(ply_boot_splash_plugin_t *plugin, ply_trigger_t *idle_trigger) {
     (void) plugin;
     ply_trigger_pull(idle_trigger, NULL);
@@ -266,6 +357,12 @@ EXPORT ply_boot_splash_plugin_interface_t *ply_boot_splash_plugin_get_interface(
         .show_splash_screen = show_splash_screen,
         .hide_splash_screen = hide_splash_screen,
         .become_idle = become_idle,
+        .display_normal = display_normal,
+        .display_password = display_password,
+        .display_question = display_question,
+        .display_prompt = display_prompt,
+        .display_message = display_message,
+        .hide_message = hide_message,
     };
     return &interface;
 }

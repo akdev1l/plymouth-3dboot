@@ -28,6 +28,12 @@ callbacks:
 | `become_idle(trigger)` | Pull the trigger: there is nothing to finish. |
 | keyboard, text display, progress, boot output | Ignored (optional callbacks may be NULL). |
 
+All boot modes (boot, shutdown, reboot, updates) show the same animation.
+Prompt and message text is drawn with `ply_label`, which needs a Plymouth
+label plugin (`label-freetype` or `label-pango`) at run time. Without one,
+the text stays invisible but the animation keeps running. The VM checklist
+covers the visual check.
+
 ## Pixels
 
 `ply_pixel_buffer` stores `uint32_t` pixels `0xAARRGGBB` with premultiplied

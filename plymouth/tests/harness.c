@@ -155,6 +155,19 @@ int main(int argc, char **argv) {
     ply_pixel_display_draw_area(&display, 10, 10, 5, 5); /* partial redraw */
     check_frame(&display, model_path, 2.75);
 
+    /* Prompts and messages redraw and never disturb the model frame
+     * (no label plugin is installed in the test environment). */
+    int draws = display.draws;
+    iface->display_password(plugin, "Disk password", 3);
+    iface->display_question(plugin, "Continue?", "yes");
+    iface->display_prompt(plugin, NULL, "secret", true);
+    iface->display_message(plugin, "Checking disks");
+    iface->hide_message(plugin, "Other message"); /* not shown: ignored */
+    iface->hide_message(plugin, "Checking disks");
+    iface->display_normal(plugin);
+    CHECK(display.draws >= draws + 6);
+    check_frame(&display, model_path, 2.75);
+
     /* In real time the frame timer keeps redrawing (30 fps)... */
     time_frozen = false;
     int before = display.draws;
