@@ -91,12 +91,22 @@ RUN git clone --depth 1 --branch "${EMSDK_VERSION}" \
 ENV EMSDK=/opt/emsdk \
     EMSDK_NODE=/opt/emsdk/node/current/node \
     PATH=/opt/emsdk:/opt/emsdk/upstream/emscripten:/opt/emsdk/node/current:${PATH}
-# Headless Chromium for the web viewer smoke test (`just browser-smoke`).
-# A separate layer so it does not invalidate the toolchain layers above.
+# Later additions, in a separate layer so they do not invalidate the
+# toolchain layers above:
+# - chromium-headless-shell: web viewer smoke test (`just browser-smoke`)
+# - meson, ninja-build and the private pkg-config dependencies of
+#   ply-splash-core / ply-splash-graphics: building the Plymouth plugin
 USER root
 RUN apt-get -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends \
         chromium-headless-shell=154.0.8037.57-1~deb13u1 \
+        libevdev-dev=1.13.4+dfsg-1 \
+        libpng-dev=1.6.48-1+deb13u5 \
+        libudev-dev=257.13-1~deb13u1 \
+        libxkbcommon-dev=1.7.0-2 \
+        meson=1.7.0-1 \
+        ninja-build=1.12.1-1 \
+        xkb-data=2.42-1 \
     && rm -rf /var/lib/apt/lists/*
 USER dev
 
