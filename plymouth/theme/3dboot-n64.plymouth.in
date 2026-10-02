@@ -1,0 +1,11 @@
+[Plymouth Theme]
+Name=3D Boot (N64)
+Description=Spinning N64 logo rendered with plymouth-3dboot
+ModuleName=plymouth-3dboot
+
+[plymouth-3dboot]
+ModelFile=@THEMEDIR@/n64_logo_spin.dae
+TurntablePeriod=6
+Shading=unlit
+BackgroundColor=000000
+FramesPerSecond=30

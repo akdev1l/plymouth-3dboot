@@ -28,3 +28,16 @@ test('harness', harness,
   env: {'LD_LIBRARY_PATH': p3b.get_variable(pkgconfig: 'libdir')},
   depends: plugin,
   timeout: 120)
+
+# Demo theme: the spinning N64 logo.
+themedir = ply_core.get_variable(pkgconfig: 'themesdir') / '3dboot-n64'
+configure_file(
+  input: 'theme/3dboot-n64.plymouth.in',
+  output: '3dboot-n64.plymouth',
+  configuration: {'THEMEDIR': themedir},
+  install: true,
+  install_dir: themedir)
+install_data(
+  fixtures / 'n64_logo' / 'n64_logo_spin.dae',
+  fixtures / 'n64_logo' / 'Readme.txt',
+  install_dir: themedir)

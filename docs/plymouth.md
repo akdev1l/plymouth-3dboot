@@ -64,6 +64,37 @@ BackgroundColor=000000
 FramesPerSecond=30
 ```
 
+## Installing
+
+Build and install the C library, then the plugin and the demo theme:
+
+```sh
+cargo cinstall -p plymouth-3dboot-capi --release --prefix /usr --libdir /usr/lib64   # adjust libdir for your distribution
+meson setup build plymouth --prefix /usr && meson install -C build
+plymouth-set-default-theme -R 3dboot-n64    # -R rebuilds the initramfs
+```
+
+The plugin goes to Plymouth's `pluginsdir`
+(`/usr/lib/<multiarch>/plymouth/plymouth-3dboot.so`). The theme goes to
+`/usr/share/plymouth/themes/3dboot-n64/`, which holds `3dboot-n64.plymouth`,
+the model and the model's Readme.
+
+**Initramfs (dracut).** Plymouth's dracut module copies the selected theme's
+directory and plugin. dracut normally pulls in the plugin's library
+dependencies automatically. If `libplymouth_3dboot.so.0` is missing from
+the initramfs (`lsinitrd | grep plymouth_3dboot`), add it explicitly:
+
+```sh
+echo 'install_items+=" /usr/lib64/libplymouth_3dboot.so.0 "' > /etc/dracut.conf.d/plymouth-3dboot.conf
+dracut -f
+```
+
+**Debugging.** Run `plymouthd --debug --debug-file=/tmp/plymouth.log` (or
+boot with `plymouth.debug`); the plugin logs through `ply_trace`, for
+example when the model cannot be loaded. To try a theme without rebooting,
+run `plymouthd; plymouth show-splash; sleep 10; plymouth quit` as root on a
+spare VT.
+
 ## Testing
 
 - **Build:** the plugin compiles against the real headers in the dev

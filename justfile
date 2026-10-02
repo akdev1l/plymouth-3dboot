@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c test-plymouth browser-smoke deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c test-plymouth plymouth-install browser-smoke deny
 
 # Format all code.
 fmt:
@@ -97,6 +97,15 @@ plymouth: capi
     meson compile -C target/plymouth
     @nm -D --defined-only target/plymouth/plymouth-3dboot.so | awk '$2 == "T" {print $3}' | grep -qx ply_boot_splash_plugin_get_interface
     @echo "plugin OK: exports ply_boot_splash_plugin_get_interface"
+
+# Install the plugin and demo theme into a scratch root and check the result.
+plymouth-install: plymouth
+    rm -rf target/plymouth-root
+    meson install -C target/plymouth --destdir "$PWD/target/plymouth-root" >/dev/null
+    test -f target/plymouth-root/usr/lib/x86_64-linux-gnu/plymouth/plymouth-3dboot.so
+    test -f target/plymouth-root/usr/share/plymouth/themes/3dboot-n64/n64_logo_spin.dae
+    grep -qx 'ModelFile=/usr/share/plymouth/themes/3dboot-n64/n64_logo_spin.dae' target/plymouth-root/usr/share/plymouth/themes/3dboot-n64/3dboot-n64.plymouth
+    @echo "plugin and theme install OK"
 
 # Run the plugin's headless harness under valgrind.
 test-plymouth: plymouth
