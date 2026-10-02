@@ -4,7 +4,7 @@
 
 use crate::anim::{Clip, Pose, WrapMode};
 use crate::color::Rgba8;
-use crate::math::{Vec3, Viewport};
+use crate::math::{Aabb, Vec3, Viewport};
 use crate::pipeline::{RenderState, Renderer};
 use crate::raster::CullMode;
 use crate::scene::{Camera, NodeId, Scene};
@@ -18,7 +18,8 @@ pub enum CameraSource {
     Fixed(Camera),
     /// The camera at a scene node (follows the node's animation).
     Node(NodeId),
-    /// A camera framing the whole scene (at rest) from `direction`, with
+    /// A camera framing the whole scene (over the whole clip, if animated)
+    /// from `direction`, with
     /// the given vertical field of view (or orthographic for `None`).
     Framed {
         /// Direction from the camera towards the scene.
@@ -109,14 +110,38 @@ pub fn frame_count(duration: f64, fps: f64) -> u64 {
     n
 }
 
+/// Poses sampled across a clip to find the space it moves through.
+const FRAMING_SAMPLES: u16 = 64;
+/// Relative margin for motion between the samples.
+const FRAMING_MARGIN: f32 = 0.02;
+
+/// Bounds of `scene` over the whole of `clip` (or at rest): the union of
+/// the bounds of evenly sampled poses, grown by a small margin, so a framing
+/// camera keeps moving models in view.
+fn animated_bounds(scene: &Scene, clip: Option<&Clip>) -> Aabb {
+    let Some(clip) = clip.filter(|c| c.duration() > 0.0) else {
+        return scene.bounds();
+    };
+    let n = f32::from(FRAMING_SAMPLES);
+    let bounds = (0..=FRAMING_SAMPLES)
+        .map(|i| clip.start() + clip.duration() * f32::from(i) / n)
+        .map(|t| scene.bounds_with(&Pose::evaluate(scene, clip, t).world(scene)))
+        .fold(Aabb::EMPTY, Aabb::union);
+    if bounds.is_empty() {
+        return bounds;
+    }
+    let grow = bounds.size() * FRAMING_MARGIN * 0.5;
+    Aabb::new(bounds.min - grow, bounds.max + grow)
+}
+
 /// Renders a scene, optionally animated by a clip, at arbitrary times.
 #[derive(Debug)]
 pub struct AnimationRenderer<'a> {
     scene: &'a Scene,
     clip: Option<(&'a Clip, WrapMode)>,
     settings: FrameSettings,
-    /// The framing camera, computed once from the rest pose so that it does
-    /// not jitter while the model moves.
+    /// The framing camera, computed once from the bounds over the whole clip
+    /// so that it neither jitters nor loses the moving model.
     framed: Option<Camera>,
     renderer: Renderer,
     target: Framebuffer,
@@ -145,7 +170,7 @@ impl<'a> AnimationRenderer<'a> {
         let aspect = settings.width.max(1) as f32 / settings.height.max(1) as f32;
         let framed = match settings.camera {
             CameraSource::Framed { direction, fov_y } => Some(Camera::framing(
-                scene.bounds(),
+                animated_bounds(scene, clip.map(|(c, _)| c)),
                 direction,
                 Vec3::Y,
                 aspect,
@@ -209,13 +234,19 @@ impl<'a> AnimationRenderer<'a> {
         Ok(&self.target.color)
     }
 
-    /// Renders `count` frames at `fps` starting at `start` seconds.
+    /// Renders `count` frames at `fps` starting at `start` seconds (no
+    /// frames unless `fps` is positive and finite).
     pub fn frames(
         &mut self,
         start: f64,
         fps: f64,
         count: u64,
     ) -> impl Iterator<Item = Result<ColorBuffer, RenderError>> + '_ {
+        let count = if fps.is_finite() && fps > 0.0 {
+            count
+        } else {
+            0
+        };
         (0..count).map(move |i| self.render_at(frame_time(start, i, fps)).cloned())
     }
 }
@@ -335,5 +366,39 @@ mod tests {
             AnimationRenderer::new(&scene, None, FrameSettings::new(1 << 20, 1)),
             Err(RenderError::Size(_))
         ));
+    }
+
+    #[test]
+    fn framing_covers_the_whole_animation() {
+        use crate::scene::Transform;
+        // A cube bouncing 10 units up: framed at rest it would leave the view.
+        let mut scene = Scene::new();
+        let mesh = scene.add_mesh(cube(1.0));
+        let node = scene
+            .add_node(
+                None,
+                Node::new("cube", LocalTransform::Trs(Transform::IDENTITY)).with_mesh(mesh),
+            )
+            .unwrap();
+        let clip = Clip::bounce(node, Vec3::ZERO, Vec3::Y * 10.0, 2.0);
+        let bounds = animated_bounds(&scene, Some(&clip));
+        assert!(bounds.max.y >= 11.0 && bounds.min.y <= -1.0, "{bounds:?}");
+        let mut r = AnimationRenderer::new(
+            &scene,
+            Some((&clip, WrapMode::Loop)),
+            FrameSettings::new(32, 32),
+        )
+        .unwrap();
+        for t in [0.0, 0.5, 1.0, 1.5] {
+            let visible = r
+                .render_at(t)
+                .unwrap()
+                .pixels()
+                .iter()
+                .filter(|p| **p != Rgba8::BLACK)
+                .count();
+            assert!(visible > 4, "t = {t}: the cube left the frame");
+        }
+        assert_eq!(r.frames(0.0, 0.0, 10).count(), 0, "fps must be positive");
     }
 }
