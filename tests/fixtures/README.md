@@ -15,6 +15,7 @@ exporter, `.dae` by ColladaMax 3.05B).
 | `n64_logo.obj` | `N64 Logo.obj` | `mtllib` line now references `n64_logo.mtl` | `0500abe1b841e8a3833e49f4c56488d259c835e4f889400e4fc411a14c29bd1d` |
 | `n64_logo.mtl` | `N64 Logo.mtl` | none | `7ff7aecf53def8042f5b47c00fcd4aa3ec45336bcf711c62bdf1a0ab81b27aeb` |
 | `n64_logo.dae` | `N64 Logo.DAE` | none | `02ed74c4bba440f1e22f50f4ff66652749b767108c069329c841d92593a3486e` |
+| `n64_logo_spin.dae` | derived from `N64 Logo.DAE` | adds `<rotate sid="spin">` to the N64 node and a LINEAR 0→360° channel over 0–3.333 s (one turn about the up axis) | n/a |
 | `Readme.txt` | `Readme.txt` | none | `c5b52f3f0162c19ddbf06d99f9bd7084cd59ad229ebec6d5ae7b336b7748616d` |
 
 Known properties, asserted by tests as the loaders land:
