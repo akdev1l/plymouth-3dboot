@@ -574,6 +574,8 @@ The ABI is designed for C callers such as a Plymouth plugin:
 - Render directly into the display's `ply_pixel_buffer` through `ARGB32_PREMULTIPLIED`, and handle multiple heads and resolution changes.
 - *Commit:* `feat(plymouth): render animated model each frame`
 
+*(12.5 was done before 12.4, so the rendering loop was tested as soon as it landed.)*
+
 **12.4 Boot-splash features**
 - Password and question prompts, plus message and progress display. At minimum, defer these to Plymouth's built-in label/entry controls, as the two-step plugin does.
 - Handle the boot / shutdown / update modes.

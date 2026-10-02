@@ -17,3 +17,14 @@ plugin = shared_module('plymouth-3dboot',
   gnu_symbol_visibility: 'hidden',
   install: true,
   install_dir: ply_core.get_variable(pkgconfig: 'pluginsdir'))
+
+# Headless harness (see tests/harness.c): run with `meson test`.
+fixtures = meson.project_source_root() / '..' / 'tests' / 'fixtures'
+harness = executable('harness', 'tests/harness.c',
+  dependencies: [ply_core, p3b, dependency('dl')],
+  link_args: ['-Wl,--export-dynamic'])
+test('harness', harness,
+  args: [plugin.full_path(), fixtures / 'n64_logo' / 'n64_logo_spin.dae'],
+  env: {'LD_LIBRARY_PATH': p3b.get_variable(pkgconfig: 'libdir')},
+  depends: plugin,
+  timeout: 120)

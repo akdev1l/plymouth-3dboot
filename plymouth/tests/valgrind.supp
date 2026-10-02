@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Leaks inside Plymouth itself (not this project), suppressed for the harness.
+
+{
+   libply-event-loop-new-leaks-its-signal-fd-watch
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   fun:calloc
+   ...
+   fun:ply_event_loop_watch_fd
+   fun:ply_event_loop_new
+}

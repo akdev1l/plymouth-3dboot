@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c plymouth browser-smoke deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example capi test-c test-plymouth browser-smoke deny
 
 # Format all code.
 fmt:
@@ -97,6 +97,14 @@ plymouth: capi
     meson compile -C target/plymouth
     @nm -D --defined-only target/plymouth/plymouth-3dboot.so | awk '$2 == "T" {print $3}' | grep -qx ply_boot_splash_plugin_get_interface
     @echo "plugin OK: exports ply_boot_splash_plugin_get_interface"
+
+# Run the plugin's headless harness under valgrind.
+test-plymouth: plymouth
+    # The build directory has no soname link (cargo cinstall creates it).
+    ln -sf libplymouth_3dboot.so target/capi/x86_64-unknown-linux-gnu/debug/libplymouth_3dboot.so.0
+    meson test -C target/plymouth --print-errorlogs \
+        --wrapper "valgrind --quiet --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite,indirect --suppressions=$PWD/plymouth/tests/valgrind.supp"
+
 
 # Regenerate the committed C header after an intended API change.
 capi-header:
