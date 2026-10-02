@@ -2,7 +2,7 @@
 //! Evaluating a clip at a point in time.
 
 use super::{Clip, ElementTrack, Property};
-use crate::math::Mat4;
+use crate::math::{Mat4, Quat, Vec3};
 use crate::scene::{LocalTransform, Scene, Transform, TransformOpKind};
 
 /// The local transform of every node of a scene at one instant.
@@ -13,18 +13,44 @@ pub struct Pose {
 
 /// Converts any local transform to TRS form (decomposing matrices), so that
 /// translation/rotation/scale channels can be applied to it.
+///
+/// Matrices that do not decompose (zero scale along an axis) keep their
+/// translation and column lengths as scale, with no rotation, instead of
+/// producing NaNs. Shear cannot be represented and is dropped.
 fn as_trs(t: &LocalTransform) -> Transform {
     match t {
         LocalTransform::Trs(t) => *t,
         other => {
-            let (scale, rotation, translation) = other.to_matrix().to_scale_rotation_translation();
-            Transform {
-                translation,
-                rotation,
-                scale,
+            let m = other.to_matrix();
+            let (scale, rotation, translation) = m.to_scale_rotation_translation();
+            if scale.is_finite() && rotation.is_finite() && translation.is_finite() {
+                Transform {
+                    translation,
+                    rotation,
+                    scale,
+                }
+            } else {
+                Transform {
+                    translation: m.w_axis.truncate(),
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::new(
+                        m.x_axis.truncate().length(),
+                        m.y_axis.truncate().length(),
+                        m.z_axis.truncate().length(),
+                    ),
+                }
             }
         }
     }
+}
+
+/// Whether a property animates the node's translation/rotation/scale (as
+/// opposed to its matrix or transform-stack elements).
+fn is_trs(property: &Property) -> bool {
+    matches!(
+        property,
+        Property::Translation(_) | Property::Rotation(_) | Property::Scale(_)
+    )
 }
 
 fn apply(transform: &mut LocalTransform, property: &Property, t: f32) {
@@ -98,9 +124,19 @@ impl Pose {
     pub fn evaluate(scene: &Scene, clip: &Clip, t: f32) -> Self {
         let mut transforms: Vec<LocalTransform> =
             scene.nodes().iter().map(|n| n.transform.clone()).collect();
-        for channel in &clip.channels {
-            if let Some(transform) = transforms.get_mut(channel.target.0) {
-                apply(transform, &channel.property, t);
+        // Matrix and stack-element channels first, TRS channels second: a
+        // TRS channel turns the node into TRS form, after which stack
+        // elements could no longer be addressed. This makes the result
+        // independent of channel order.
+        for trs_pass in [false, true] {
+            for channel in clip
+                .channels
+                .iter()
+                .filter(|c| is_trs(&c.property) == trs_pass)
+            {
+                if let Some(transform) = transforms.get_mut(channel.target.0) {
+                    apply(transform, &channel.property, t);
+                }
             }
         }
         Self {
@@ -301,5 +337,64 @@ mod tests {
             Vec3::ZERO,
         );
         assert!(local.abs_diff_eq(expected, 1e-5));
+    }
+
+    #[test]
+    fn degenerate_matrices_do_not_produce_nan() {
+        let mut scene = Scene::new();
+        let stack = LocalTransform::Stack(vec![
+            TransformOp {
+                sid: "t".into(),
+                kind: TransformOpKind::Translate(Vec3::new(1.0, 2.0, 3.0)),
+            },
+            TransformOp {
+                sid: "s".into(),
+                kind: TransformOpKind::Scale(Vec3::ZERO),
+            },
+        ]);
+        let n = scene.add_node(None, Node::new("n", stack)).unwrap();
+        let clip = Clip::new(
+            "c",
+            vec![Channel {
+                target: n,
+                property: Property::Scale(Track::constant(Vec3::ONE)),
+            }],
+        );
+        let local = Pose::evaluate(&scene, &clip, 0.0).locals()[n.0];
+        assert!(local.is_finite(), "{local}");
+        assert_eq!(local, Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0)));
+    }
+
+    #[test]
+    fn channel_order_does_not_matter() {
+        let mut scene = Scene::new();
+        let stack = LocalTransform::Stack(vec![TransformOp {
+            sid: "t".into(),
+            kind: TransformOpKind::Translate(Vec3::ZERO),
+        }]);
+        let n = scene.add_node(None, Node::new("n", stack)).unwrap();
+        let element = Channel {
+            target: n,
+            property: Property::StackElement {
+                sid: "t".into(),
+                track: ElementTrack::Vector(Track::constant(Vec3::X)),
+            },
+        };
+        let scale = Channel {
+            target: n,
+            property: Property::Scale(Track::constant(Vec3::splat(2.0))),
+        };
+        let a = Pose::evaluate(
+            &scene,
+            &Clip::new("a", vec![element.clone(), scale.clone()]),
+            0.0,
+        );
+        let b = Pose::evaluate(&scene, &Clip::new("b", vec![scale, element]), 0.0);
+        assert_eq!(a, b);
+        assert_eq!(
+            a.locals()[n.0].transform_point3(Vec3::ZERO),
+            Vec3::X,
+            "the element applied in both orders"
+        );
     }
 }
