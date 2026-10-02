@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Fedora 44 environment: builds and tests the C library and the Plymouth
+# plugin against Fedora's own toolchain and Plymouth, and produces RPMs
+# (`just rpm`). The Debian Containerfile remains the main development
+# environment (wasm, SDL, browser tests).
+# Use:    DEV_CONTAINER=fedora scripts/dev.sh <command>
+
+FROM registry.fedoraproject.org/fedora:44@sha256:07584325a68e0308215aff1de506d8da6452d2e465c25729829a01393446f204
+
+# Fedora packages only; Rust comes from Fedora (rust 1.98.1, matching
+# rust-toolchain.toml), as it would in a Fedora build system. The base image
+# is pinned, but Fedora keeps only the latest update of each package, so the
+# packages cannot be pinned: they follow Fedora 44 updates.
+# - cargo, rust, cargo-c, cargo-rpm-macros: the C library and RPM macros
+# - cargo-vendor-filterer: vendored crates for the source RPM (Linux only)
+# - gcc, meson, ninja-build, pkgconf-pkg-config, plymouth-devel: the plugin
+# - plymouth-plugin-label: text rendering, as at run time
+# - rpm-build, rpmdevtools: rpmbuild
+# - valgrind: memory checking of the C ABI tests and the plugin harness
+# - git-core, just, tar, gzip, findutils, diffutils, binutils: tooling
+RUN dnf -y install --setopt=install_weak_deps=False \
+        binutils \
+        cargo \
+        cargo-c \
+        cargo-rpm-macros \
+        cargo-vendor-filterer \
+        diffutils \
+        findutils \
+        gcc \
+        git-core \
+        gzip \
+        just \
+        meson \
+        ninja-build \
+        pkgconf-pkg-config \
+        plymouth-devel \
+        plymouth-plugin-label \
+        rpm-build \
+        rpmdevtools \
+        rust \
+        tar \
+        valgrind \
+    && dnf clean all
+
+# Unprivileged user (uid 1000), as in the Debian image. The cargo home and
+# /work/target exist here, owned by `dev`, so the volumes scripts/dev.sh
+# mounts on them start out writable.
+RUN useradd --create-home --uid 1000 --shell /bin/bash dev \
+    && mkdir -p /home/dev/.cargo /work/target \
+    && chown dev:dev /home/dev/.cargo /work /work/target
+USER dev
+ENV CARGO_HOME=/home/dev/.cargo
+WORKDIR /work

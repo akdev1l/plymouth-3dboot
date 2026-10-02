@@ -71,6 +71,68 @@ Threads=2
 
 ## Installing
 
+### Fedora (RPM)
+
+`packaging/plymouth-3dboot.spec` builds four packages: `plymouth-3dboot`
+(the library), `plymouth-3dboot-devel`, `plymouth-plugin-3dboot` and
+`plymouth-theme-3dboot-n64`. Build them from the working tree in the Fedora
+container (see [toolchain.md](toolchain.md)):
+
+```sh
+DEV_CONTAINER=fedora scripts/dev.sh just rpm
+```
+
+Each build's release contains its UTC time and commit (with `.dirty` for
+uncommitted changes), so a newer build always upgrades an older one.
+
+**Fedora Workstation** (and other mutable variants):
+
+```sh
+sudo dnf install dist/rpm/plymouth-3dboot-0*.x86_64.rpm \
+    dist/rpm/plymouth-plugin-3dboot-0*.rpm dist/rpm/plymouth-theme-3dboot-n64-*.rpm
+sudo plymouth-set-default-theme -R 3dboot-n64    # -R rebuilds the initramfs
+```
+
+**Fedora Atomic** (Silverblue, Kinoite, uBlue images): `/usr` is read-only
+and the initramfs comes with the image.
+
+- *Try it without rebooting.* This is lost on the next reboot:
+
+  ```sh
+  sudo rpm-ostree usroverlay               # temporarily writable /usr
+  sudo rpm -Uvh dist/rpm/plymouth-3dboot-0*.x86_64.rpm \
+      dist/rpm/plymouth-plugin-3dboot-0*.rpm dist/rpm/plymouth-theme-3dboot-n64-*.rpm
+  ```
+
+  Then, as root on a spare VT (Ctrl+Alt+F3), run
+  `plymouthd; plymouth show-splash; sleep 15; plymouth quit`. To test the
+  prompt, run `plymouth ask-for-password --prompt=Test` while the splash is
+  showing. Select the theme first; see *Selecting the theme* below.
+- *Install it for boot.* Layer the packages, select the theme, and
+  regenerate the initramfs locally:
+
+  ```sh
+  sudo rpm-ostree install dist/rpm/plymouth-3dboot-0*.x86_64.rpm \
+      dist/rpm/plymouth-plugin-3dboot-0*.rpm dist/rpm/plymouth-theme-3dboot-n64-*.rpm
+  printf '[Daemon]\nTheme=3dboot-n64\n' | sudo tee /etc/plymouth/plymouthd.conf
+  sudo rpm-ostree initramfs --enable
+  systemctl reboot
+  ```
+
+  To undo, pick the previous deployment in the boot menu, or run
+  `sudo rpm-ostree rollback`. To remove it for good, run
+  `rpm-ostree uninstall` on the three packages and `rpm-ostree initramfs --disable`,
+  and set `Theme=` back to the previous theme (`bgrt` on Fedora).
+- *Selecting the theme.* Plymouth reads `Theme=` from
+  `/etc/plymouth/plymouthd.conf` (`[Daemon]` section). Note the current value
+  before changing it (`plymouth-set-default-theme` prints it).
+
+Updating an installed build: run `rpm -Uvh` with the new files. On Atomic,
+replace layered packages in one step with
+`sudo rpm-ostree uninstall plymouth-3dboot plymouth-plugin-3dboot plymouth-theme-3dboot-n64 --install <new .rpm files>`.
+
+### From source
+
 Build and install the C library, then the plugin and the demo theme:
 
 ```sh

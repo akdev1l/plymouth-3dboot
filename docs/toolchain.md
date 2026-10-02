@@ -9,6 +9,27 @@ environment with `scripts/dev.sh <command>`.
 It tags the image with a hash of both files, rebuilds it when either changes,
 and prunes superseded images and Emscripten cache volumes.
 
+## Fedora container
+
+[`Containerfile.fedora`](../Containerfile.fedora) (`fedora:44`, pinned by
+digest) builds and tests the C library and the Plymouth plugin against
+Fedora's toolchain and Plymouth, and builds the RPMs. Select it with
+`DEV_CONTAINER=fedora`:
+
+```sh
+DEV_CONTAINER=fedora scripts/dev.sh just test-c test-plymouth
+DEV_CONTAINER=fedora scripts/dev.sh just rpm     # RPMs in dist/rpm/
+```
+
+It uses Fedora's packages only: rust/cargo 1.98.1 (no rustup, so
+`rust-toolchain.toml` does not apply), cargo-c 0.10.24, Plymouth 24.004.60
+with its label plugin, meson, rpm-build, cargo-rpm-macros and
+cargo-vendor-filterer. Fedora keeps only the latest update of each package,
+so packages follow Fedora 44 updates rather than exact versions. The
+container mounts its own volume on `target/`, so its build outputs never mix
+with the Debian container's. It has no Emscripten or SDL: `just check` stays
+in the Debian container.
+
 ## Version matrix
 
 | Component | Version | Notes |

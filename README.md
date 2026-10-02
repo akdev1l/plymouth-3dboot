@@ -22,12 +22,14 @@ execution plan.
 ## Development environment
 
 Everything runs in a pinned container (podman), defined in
-[`Containerfile`](Containerfile):
+[`Containerfile`](Containerfile). [`Containerfile.fedora`](Containerfile.fedora)
+builds the Fedora RPMs ([packaging/](packaging/plymouth-3dboot.spec)):
 
 ```sh
 scripts/dev.sh just check    # full quality gate (builds the image on first use)
 scripts/dev.sh just --list   # all recipes
 scripts/dev.sh               # interactive shell
+DEV_CONTAINER=fedora scripts/dev.sh just rpm   # Fedora RPMs in dist/rpm/
 ```
 
 ### Viewer

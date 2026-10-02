@@ -12,14 +12,31 @@
 # Superseded images and their cache volumes are pruned after a rebuild.
 #
 # Environment:
+#   DEV_CONTAINER  `debian` (default): Containerfile, the full environment;
+#                  `fedora`: Containerfile.fedora, for the C library, the
+#                  Plymouth plugin and RPMs on Fedora. The Fedora container
+#                  mounts its own volume on target/, so the two never share
+#                  build outputs.
 #   DEV_ENV_PASS   space-separated extra variables to forward (UPDATE_GOLDEN,
 #                  RUST_BACKTRACE, RUST_LOG and SDL_VIDEODRIVER are always
 #                  forwarded when set)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image_name="plymouth-3dboot-dev"
-containerfile="${repo_root}/Containerfile"
+case "${DEV_CONTAINER:-debian}" in
+    debian)
+        image_name="plymouth-3dboot-dev"
+        containerfile="${repo_root}/Containerfile"
+        ;;
+    fedora)
+        image_name="plymouth-3dboot-dev-fedora"
+        containerfile="${repo_root}/Containerfile.fedora"
+        ;;
+    *)
+        echo "dev.sh: unknown DEV_CONTAINER '${DEV_CONTAINER}' (debian or fedora)" >&2
+        exit 2
+        ;;
+esac
 
 hash="$(cat "${containerfile}" "${repo_root}/rust-toolchain.toml" | sha256sum | cut -c1-12)"
 image="${image_name}:${hash}"
@@ -36,7 +53,7 @@ if ! podman image exists "${image}"; then
     # Prune superseded images and emscripten cache volumes (best effort:
     # anything still in use is kept).
     podman images --filter "reference=localhost/${image_name}" --format '{{.Repository}}:{{.Tag}}' |
-        grep -v -e ":${hash}\$" -e ':latest$' |
+        grep "^localhost/${image_name}:" | grep -v -e ":${hash}\$" -e ':latest$' |
         xargs -r podman rmi >/dev/null 2>&1 || true
     podman volume ls --format '{{.Name}}' |
         grep "^${image_name}-emcache-" | grep -v -e "-${hash}\$" |
@@ -54,10 +71,15 @@ run_args=(
     --volume "${repo_root}:/work:z"
     # Cargo registry/git cache shared across runs.
     --volume "${image_name}-cargo:/home/dev/.cargo"
-    # Emscripten cache, seeded from this exact image on first use.
-    --volume "${emcache_volume}:/opt/emsdk/upstream/emscripten/cache"
     --workdir /work
 )
+if [[ "${DEV_CONTAINER:-debian}" == debian ]]; then
+    # Emscripten cache, seeded from this exact image on first use.
+    run_args+=(--volume "${emcache_volume}:/opt/emsdk/upstream/emscripten/cache")
+else
+    # Separate build outputs (different rustc and system libraries).
+    run_args+=(--volume "${image_name}-target:/work/target")
+fi
 
 for var in UPDATE_GOLDEN RUST_BACKTRACE RUST_LOG SDL_VIDEODRIVER ${DEV_ENV_PASS:-}; do
     if [[ -n "${!var:-}" ]]; then

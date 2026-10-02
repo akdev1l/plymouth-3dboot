@@ -622,6 +622,11 @@ The ABI is designed for C callers such as a Plymouth plugin:
 - Already met: 97.4 % of lines across the workspace, at least 88.9 % in every core file. `just cov` now fails below 85 %.
 - *Commit:* `test: enforce the line coverage threshold`
 
+**Fedora packaging** ✅ (added on request after Phase 13)
+- `Containerfile.fedora` (Fedora 44 toolchain and Plymouth, `DEV_CONTAINER=fedora scripts/dev.sh`), `packaging/plymouth-3dboot.spec` (library, -devel, plugin, theme; offline build from vendored crates), `just rpm`.
+- *Tests:* the C API tests and the plugin harness under valgrind pass in the Fedora container (with Plymouth's label plugin installed); `%check` runs the harness; the RPMs install into a clean Fedora 44 and `plymouth-populate-initrd` includes the plugin, the library and the whole theme.
+- *Commit:* `build: add a Fedora container and an RPM spec`
+
 ---
 
 ### Phase 14: Deferred (decide at this point)
