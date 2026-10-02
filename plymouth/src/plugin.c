@@ -110,6 +110,8 @@ static ply_boot_splash_plugin_t *create_plugin(ply_key_file_t *key_file) {
 
     double antialias = ply_key_file_get_double(key_file, GROUP, "Antialias", 1.0);
     plugin->options.antialias = antialias >= 1.0 && antialias <= 8.0 ? (uint8_t) antialias : 1;
+    double threads = ply_key_file_get_double(key_file, GROUP, "Threads", 1.0);
+    plugin->options.threads = threads >= 1.0 && threads <= 64.0 ? (uint8_t) threads : 1;
 
     plugin->fps = ply_key_file_get_double(key_file, GROUP, "FramesPerSecond", 30.0);
     if (!(plugin->fps >= 1.0 && plugin->fps <= 60.0))

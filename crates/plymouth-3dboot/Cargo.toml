@@ -14,6 +14,7 @@ gif = { workspace = true, optional = true }
 glam.workspace = true
 libm.workspace = true
 png.workspace = true
+rayon = { workspace = true, optional = true }
 roxmltree.workspace = true
 thiserror.workspace = true
 
@@ -21,6 +22,8 @@ thiserror.workspace = true
 default = ["gif"]
 # Animated GIF output (io::gif).
 gif = ["dep:gif"]
+# Render bands on multiple threads (rayon); see Renderer::with_threads.
+parallel = ["dep:rayon"]
 
 [dev-dependencies]
 plymouth-3dboot-testutil.workspace = true

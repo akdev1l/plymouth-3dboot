@@ -605,18 +605,18 @@ The ABI is designed for C callers such as a Plymouth plugin:
 
 ### Phase 13: Quality & performance
 
-**13.1 Supersampling anti-aliasing (SSAA), then MSAA**
+**13.1 Supersampling anti-aliasing (SSAA), then MSAA** ✅ (SSAA; MSAA is not needed for the current models)
 - *Tests:* goldens are updated together with an edge-quality test.
 - *Commit:* `feat(raster): add supersampling anti-aliasing`
 
-**13.2 Benchmarks**
+**13.2 Benchmarks** ✅
 - `criterion` natively, plus wasm frame timing for the N64 scene under node. Record a baseline in `docs/perf.md`, with a frame-time budget for the viewer at its target resolution.
 - *Commit:* `perf: add native and wasm benchmarks`
 
-**13.3 Tiled rasterization**
-- A single-threaded tiled path (better cache use on both targets) and a `rayon` feature that is **native only**. Wasm stays single-threaded unless pthreads/COOP-COEP is adopted later.
-- *Tests:* tiled output equals untiled output, and parallel equals serial, byte for byte.
-- *Commit:* `perf(raster): add tiled and parallel rasterization`
+**13.3 Tiled rasterization** ✅
+- Profiling showed per-pixel work, not cache misses, dominating, so the serial path was optimized directly: sRGB encoding by table lookup and exact per-row span traversal. Frames are then split into horizontal bands (row tiles) that render on rayon with the native-only `parallel` feature (`FrameSettings::threads`, C `threads`, theme `Threads`). Wasm stays single-threaded unless pthreads/COOP-COEP is adopted later.
+- *Tests:* banded output equals serial output, byte for byte, for any thread count (core, C API).
+- *Commits:* `perf(color): …` (×2), `perf(raster): visit only the covered span of each row`, `perf(raster): add tiled and parallel rasterization`
 
 **13.4 ≥85 % line coverage on core**
 - *Commit:* `test: raise coverage of core modules`

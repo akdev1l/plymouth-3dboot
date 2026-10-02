@@ -50,6 +50,9 @@ pub struct FrameSettings {
     /// Supersampling anti-aliasing: samples per axis (1 = off, up to
     /// [`MAX_ANTIALIAS`]). Rendering cost grows with its square.
     pub antialias: u32,
+    /// Rendering threads (see [`Renderer::with_threads`]); takes effect with
+    /// the `parallel` feature. The output does not depend on it.
+    pub threads: usize,
 }
 
 /// Largest supported [`FrameSettings::antialias`].
@@ -73,6 +76,7 @@ impl FrameSettings {
             cull: CullMode::Back,
             background: Rgba8::BLACK,
             antialias: 1,
+            threads: 1,
         }
     }
 }
@@ -209,13 +213,14 @@ impl<'a> AnimationRenderer<'a> {
             )),
             _ => None,
         };
+        let renderer = Renderer::with_threads(settings.threads);
         Ok(Self {
             resolved,
             scene,
             clip,
             settings,
             framed,
-            renderer: Renderer::new(),
+            renderer,
             target,
         })
     }
@@ -491,5 +496,25 @@ mod tests {
             ),
             Err(RenderError::Size(_))
         ));
+    }
+
+    #[test]
+    fn thread_count_does_not_change_frames() {
+        let (scene, clip) = spinning_cube();
+        let frame = |threads| {
+            let settings = FrameSettings {
+                threads,
+                antialias: 2,
+                ..FrameSettings::new(40, 30)
+            };
+            AnimationRenderer::new(&scene, Some((&clip, WrapMode::Loop)), settings)
+                .unwrap()
+                .render_at(0.7)
+                .unwrap()
+                .clone()
+        };
+        let serial = frame(1);
+        assert_eq!(frame(4), serial);
+        assert_eq!(frame(0), serial, "0 means one thread");
     }
 }

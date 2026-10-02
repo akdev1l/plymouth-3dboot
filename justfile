@@ -136,7 +136,7 @@ capi-header:
 
 # Run the criterion benchmarks (native, not part of check).
 bench *args:
-    cargo bench --locked -p plymouth-3dboot --bench render -- "$@"
+    cargo bench --locked -p plymouth-3dboot --features parallel --bench render -- "$@"
 
 # Median frame time natively and as WebAssembly under node.
 bench-wasm:

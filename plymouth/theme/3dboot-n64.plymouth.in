@@ -10,3 +10,4 @@ Shading=unlit
 BackgroundColor=000000
 FramesPerSecond=30
 Antialias=1
+Threads=2

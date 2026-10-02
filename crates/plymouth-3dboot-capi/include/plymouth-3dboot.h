@@ -108,6 +108,9 @@ typedef struct p3b_render_options {
   // Supersampling anti-aliasing: samples per axis, 1 (off) to 8. Cost
   // grows with its square.
   uint8_t antialias;
+  // Rendering threads (1 = single-threaded, up to 64). The output does
+  // not depend on it.
+  uint8_t threads;
 } p3b_render_options;
 
 // Layout of the pixels written by `p3b_render_frame` (`P3B_PIXEL_FORMAT_*`).

@@ -104,6 +104,9 @@ pub struct p3b_render_options {
     /// Supersampling anti-aliasing: samples per axis, 1 (off) to 8. Cost
     /// grows with its square.
     pub antialias: u8,
+    /// Rendering threads (1 = single-threaded, up to 64). The output does
+    /// not depend on it.
+    pub threads: u8,
 }
 
 /// The default options: unlit shading on opaque black, back-face culling,
@@ -125,6 +128,7 @@ pub extern "C" fn p3b_render_options_default() -> p3b_render_options {
         z_near: 0.1,
         z_far: 100.0,
         antialias: 1,
+        threads: 1,
     }
 }
 
@@ -182,6 +186,12 @@ fn settings(width: u32, height: u32, o: &p3b_render_options) -> Result<FrameSett
         P3B_SHADING_BLINN_PHONG => ShadingModel::BlinnPhong,
         other => return Err(invalid(&format!("unknown shading model {other}"))),
     };
+    if !(1..=plymouth_3dboot::pipeline::MAX_THREADS).contains(&usize::from(o.threads)) {
+        return Err(invalid(&format!(
+            "thread count {} is outside 1..=64",
+            o.threads
+        )));
+    }
     Ok(FrameSettings {
         camera,
         shading,
@@ -192,6 +202,7 @@ fn settings(width: u32, height: u32, o: &p3b_render_options) -> Result<FrameSett
         },
         background: Rgba8::from(o.background),
         antialias: u32::from(o.antialias),
+        threads: usize::from(o.threads),
         ..FrameSettings::new(width, height)
     })
 }
@@ -604,6 +615,14 @@ mod tests {
                 },
                 p3b_render_options {
                     antialias: 9,
+                    ..p3b_render_options_default()
+                },
+                p3b_render_options {
+                    threads: 0,
+                    ..p3b_render_options_default()
+                },
+                p3b_render_options {
+                    threads: 65,
                     ..p3b_render_options_default()
                 },
             ] {

@@ -65,6 +65,8 @@ FramesPerSecond=30
 # Supersampling anti-aliasing, samples per axis (1 = off, up to 8; cost grows
 # with its square).
 Antialias=1
+# Rendering threads (1–64); the image does not depend on it.
+Threads=2
 ```
 
 ## Installing

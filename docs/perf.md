@@ -30,7 +30,7 @@ single-threaded, on an AMD Ryzen 7 5800X:
 
 At 1080p the renderer is just below the plugin's default 30 fps. The
 time-based animation stays correct; slower machines show fewer frames.
-Phase 13 (tiled and parallel rasterization) targets this.
+Phase 13 addressed this; see below.
 
 ## Benchmarks
 
@@ -50,3 +50,20 @@ optimizations in Phase 13.3):
 | `frame_timing`, native / wasm (node) | 6.6 ms / 8.6 ms |
 
 Fragment processing dominates: about 35 ns per pixel for a flat quad.
+
+After Phase 13.3 (same machine, `just bench`):
+
+| Benchmark | Before | After |
+|---|---|---|
+| `fill_1080p_quad` | 71 ms | 51 ms |
+| `n64_frame_640x480` | 6.3 ms | 1.0 ms |
+| `n64_frame_1080p` | 32.8 ms | 5.0 ms |
+| `n64_frame_640x480_aa2` | 33.0 ms | 6.6 ms |
+| `n64_frame_1080p_8_threads` | — | 1.3 ms |
+| `frame_timing`, native / wasm (node) | 6.6 / 8.6 ms | 1.0 / 1.4 ms |
+
+The gains came from per-pixel work: sRGB encoding by table lookup (the
+transfer function's `powf` dominated), and visiting only the covered span of
+each row. Threads (`FrameSettings::threads`, the `parallel` feature) split
+the frame into four bands per thread on a pool the renderer owns. A full
+1080p frame at 30 fps now uses about 15 % of one core.

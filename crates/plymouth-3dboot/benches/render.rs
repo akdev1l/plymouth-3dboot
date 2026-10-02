@@ -85,9 +85,12 @@ mod benches {
             ("n64_frame_640x480", 640, 480, 1),
             ("n64_frame_1080p", 1920, 1080, 1),
             ("n64_frame_640x480_aa2", 640, 480, 2),
+            ("n64_frame_1080p_8_threads", 1920, 1080, 1),
         ] {
+            let threads = if name.ends_with("threads") { 8 } else { 1 };
             let settings = FrameSettings {
                 antialias: aa,
+                threads,
                 ..FrameSettings::new(w, h)
             };
             let mut r = model.renderer(Some(0), WrapMode::Loop, settings).unwrap();

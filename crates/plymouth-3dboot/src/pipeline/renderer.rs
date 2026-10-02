@@ -3,6 +3,7 @@
 
 use super::{ClipVertex, Clipper, DepthState, ScreenVertex, perspective_weights};
 use crate::color::LinearRgba;
+use crate::color::Rgba8;
 use crate::math::Viewport;
 use crate::raster::{CullMode, Interpolate, Rect, TriangleSetup, Winding};
 use crate::target::{Framebuffer, MAX_DIMENSION};
@@ -12,11 +13,12 @@ use crate::target::{Framebuffer, MAX_DIMENSION};
 /// Implementations are plain Rust types. The renderer is generic over
 /// them, so shading compiles to direct calls. Shaders own (or borrow) their
 /// vertex data and *pull* vertices by index, so meshes with separate
-/// attribute arrays need no interleaved copy.
-pub trait Shader {
+/// attribute arrays need no interleaved copy. Shaders are shared between
+/// rendering threads, hence `Sync`.
+pub trait Shader: Sync {
     /// Attributes passed from the vertex to the fragment stage, interpolated
     /// perspective-correctly.
-    type Varyings: Interpolate;
+    type Varyings: Interpolate + Send + Sync;
 
     /// Transforms vertex `index` (always `< vertex_count` of the draw call)
     /// into clip space.
@@ -122,18 +124,133 @@ pub enum DrawError {
 
 /// Executes draw calls.
 ///
-/// The renderer is cheap to create. Keep one around so that future
+/// The renderer is cheap to create; keep one around so that future
 /// versions can reuse internal scratch memory between draws.
-#[derive(Debug, Default)]
+///
+/// Rasterization can be split into horizontal bands (see
+/// [`Renderer::with_threads`]), rendered in parallel with the `parallel`
+/// feature. Each band processes triangles in submission order, so the
+/// output is byte-identical for every thread count.
+#[derive(Debug)]
 pub struct Renderer {
-    _private: (),
+    threads: usize,
+    /// Worker threads (`threads` of them), when rendering in parallel.
+    #[cfg(all(feature = "parallel", not(target_os = "emscripten")))]
+    pool: Option<rayon::ThreadPool>,
+}
+
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::with_threads(1)
+    }
+}
+
+/// Largest [`Renderer::with_threads`] count.
+pub const MAX_THREADS: usize = 64;
+
+/// A triangle after clipping, setup and culling, ready to rasterize.
+struct Prepared<V> {
+    setup: TriangleSetup,
+    depths: [f32; 3],
+    inv_w: [f32; 3],
+    varyings: [V; 3],
+    front_facing: bool,
+}
+
+/// Rows `y0..y1` (all columns) of the target.
+struct Band<'a> {
+    y0: u32,
+    y1: u32,
+    width: usize,
+    color: &'a mut [Rgba8],
+    depth: &'a mut [f32],
+}
+
+/// Rasterizes and shades `prepared` triangles within `scissor` into `band`;
+/// returns (fragments shaded, fragments written).
+fn rasterize_band<S: Shader>(
+    shader: &S,
+    state: &RenderState,
+    scissor: Rect,
+    prepared: &[Prepared<S::Varyings>],
+    band: Band<'_>,
+) -> (usize, usize) {
+    let rect = scissor.intersect(&Rect {
+        x0: scissor.x0,
+        y0: band.y0,
+        x1: scissor.x1,
+        y1: band.y1,
+    });
+    let (mut shaded, mut written) = (0, 0);
+    for tri in prepared {
+        tri.setup.for_each_pixel(rect, |f| {
+            let index = (f.y - band.y0) as usize * band.width + f.x as usize;
+            let bary = f.barycentric();
+            let depth = f32::interpolate(tri.depths, bary);
+            let stored = &mut band.depth[index];
+            if !state.depth.func.passes(depth, *stored) {
+                return;
+            }
+            let input = FragmentInput {
+                x: f.x,
+                y: f.y,
+                depth,
+                front_facing: tri.front_facing,
+                varyings: S::Varyings::interpolate(
+                    tri.varyings,
+                    perspective_weights(bary, tri.inv_w),
+                ),
+            };
+            shaded += 1;
+            let Some(color) = shader.fragment(&input) else {
+                return;
+            };
+            if state.depth.write {
+                *stored = depth;
+            }
+            band.color[index] = color.to_srgb8();
+            written += 1;
+        });
+    }
+    (shaded, written)
 }
 
 impl Renderer {
-    /// Creates a renderer.
+    /// Creates a single-threaded renderer.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A renderer using `threads` threads (clamped to `1..=MAX_THREADS`).
+    /// With more than one, each frame is split into `4 × threads` bands for
+    /// load balance. With the `parallel` feature the renderer owns a pool of
+    /// `threads` worker threads that render the bands concurrently (except
+    /// on Emscripten, which has no threads, or if the threads cannot be
+    /// spawned); otherwise the bands render one after another. Output is
+    /// identical either way.
+    #[must_use]
+    pub fn with_threads(threads: usize) -> Self {
+        let threads = threads.clamp(1, MAX_THREADS);
+        Self {
+            threads,
+            #[cfg(all(feature = "parallel", not(target_os = "emscripten")))]
+            pool: (threads > 1)
+                .then(|| {
+                    rayon::ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .thread_name(|i| format!("p3b-render-{i}"))
+                        .build()
+                        .ok()
+                })
+                .flatten(),
+        }
+    }
+
+    /// Number of threads requested.
+    #[must_use]
+    pub fn threads(&self) -> usize {
+        self.threads
     }
 
     /// Draws indexed triangles (`indices` in groups of three, referring to
@@ -191,6 +308,8 @@ impl Renderer {
             ..DrawStats::default()
         };
 
+        // Phase 1 (serial): clip, set up and cull every triangle.
+        let mut prepared = Vec::with_capacity(indices.len() / 3);
         for &[a, b, c] in indices.as_chunks::<3>().0 {
             let input = [clip[a as usize], clip[b as usize], clip[c as usize]];
             clipper.clip(input, |clipped| {
@@ -204,43 +323,67 @@ impl Renderer {
                     return;
                 }
                 stats.rasterized += 1;
-                let front_facing = setup.winding() == Winding::CounterClockwise;
-                let depths = screen.map(|v| v.position.z);
-                let inv_w = screen.map(|v| v.inv_w);
-                let varyings = screen.map(|v| v.varyings);
-                setup.for_each_pixel(scissor, |f| {
-                    let bary = f.barycentric();
-                    let depth = f32::interpolate(depths, bary);
-                    let Some(stored) = target.depth.get_mut(f.x, f.y) else {
-                        return;
-                    };
-                    if !state.depth.func.passes(depth, *stored) {
-                        return;
-                    }
-                    let input = FragmentInput {
-                        x: f.x,
-                        y: f.y,
-                        depth,
-                        front_facing,
-                        varyings: S::Varyings::interpolate(
-                            varyings,
-                            perspective_weights(bary, inv_w),
-                        ),
-                    };
-                    stats.fragments_shaded += 1;
-                    let Some(color) = shader.fragment(&input) else {
-                        return;
-                    };
-                    if state.depth.write {
-                        *stored = depth;
-                    }
-                    if let Some(px) = target.color.get_mut(f.x, f.y) {
-                        *px = color.to_srgb8();
-                        stats.fragments_written += 1;
-                    }
+                prepared.push(Prepared {
+                    setup,
+                    depths: screen.map(|v| v.position.z),
+                    inv_w: screen.map(|v| v.inv_w),
+                    varyings: screen.map(|v| v.varyings),
+                    front_facing: setup.winding() == Winding::CounterClockwise,
                 });
             });
         }
+        if scissor.is_empty() || prepared.is_empty() {
+            return Ok(stats);
+        }
+
+        // Phase 2: rasterize horizontal bands of the scissored rows.
+        let width = target.width() as usize;
+        let rows = (scissor.y1 - scissor.y0) as usize;
+        // Several bands per thread balance the load when the geometry covers
+        // only part of the frame.
+        let bands = if self.threads > 1 {
+            self.threads * 4
+        } else {
+            1
+        };
+        let band_rows = rows.div_ceil(bands.min(rows));
+        let first = scissor.y0 as usize * width;
+        let len = rows * width;
+        let colors = target.color.pixels_mut()[first..first + len].chunks_mut(band_rows * width);
+        let depths = target.depth.values_mut()[first..first + len].chunks_mut(band_rows * width);
+        let bands = colors.zip(depths).enumerate().map(|(i, (color, depth))| {
+            let y0 = scissor.y0 + u32::try_from(i * band_rows).unwrap_or(u32::MAX);
+            let y1 = y0 + u32::try_from(color.len() / width).unwrap_or(0);
+            Band {
+                y0,
+                y1,
+                width,
+                color,
+                depth,
+            }
+        });
+        let render = |band| rasterize_band(shader, state, scissor, &prepared, band);
+        #[cfg(all(feature = "parallel", not(target_os = "emscripten")))]
+        let (shaded, written) = if let Some(pool) = &self.pool {
+            use rayon::prelude::*;
+            let bands: Vec<_> = bands.collect();
+            pool.install(|| {
+                bands
+                    .into_par_iter()
+                    .map(render)
+                    .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+            })
+        } else {
+            bands
+                .map(render)
+                .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+        };
+        #[cfg(not(all(feature = "parallel", not(target_os = "emscripten"))))]
+        let (shaded, written) = bands
+            .map(render)
+            .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+        stats.fragments_shaded = shaded;
+        stats.fragments_written = written;
         Ok(stats)
     }
 }
@@ -248,7 +391,6 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::color::Rgba8;
     use crate::math::Vec4;
 
     /// Positions are already in clip space; varyings carry a colour.
@@ -547,5 +689,47 @@ mod tests {
         // Screen-space midpoint: u = (0.5/4) / (0.5/1 + 0.5/4) = 0.2.
         let mid = target.color.get(32, 0).unwrap().to_linear().r;
         assert!((mid - 0.2).abs() < 0.02, "u at screen centre = {mid}");
+    }
+
+    #[test]
+    fn banded_rendering_is_byte_identical() {
+        // Overlapping, interpenetrating triangles across the whole target.
+        let verts: Vec<(Vec4, LinearRgba)> = (0..24)
+            .map(|i| {
+                let f = i as f32;
+                let p = Vec4::new(
+                    libm::sinf(f * 1.7) * 1.2,
+                    libm::cosf(f * 2.3) * 1.2,
+                    libm::sinf(f * 0.9) * 0.9,
+                    1.0,
+                );
+                (p, LinearRgba::rgb(f / 24.0, 1.0 - f / 24.0, 0.5))
+            })
+            .collect();
+        let indices: Vec<u32> = (0..24).collect();
+        let shader = Passthrough(verts);
+        let render = |threads| {
+            let mut target = fb(61, 47);
+            let mut state = RenderState::new(Viewport {
+                x: 3,
+                y: 2,
+                width: 55,
+                height: 41,
+            });
+            state.cull = CullMode::None;
+            let stats = Renderer::with_threads(threads)
+                .draw_indexed(&mut target, &state, &shader, 24, &indices)
+                .unwrap();
+            (target, stats)
+        };
+        let (serial, serial_stats) = render(1);
+        assert!(serial_stats.fragments_written > 500);
+        for threads in [2, 3, 7, 64] {
+            let (banded, stats) = render(threads);
+            assert_eq!(banded, serial, "{threads} bands");
+            assert_eq!(stats, serial_stats, "{threads} bands");
+        }
+        assert_eq!(Renderer::with_threads(0).threads(), 1);
+        assert_eq!(Renderer::with_threads(1000).threads(), MAX_THREADS);
     }
 }

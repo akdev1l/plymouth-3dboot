@@ -75,8 +75,9 @@ A complete program is in
   (for example by throwing C++ exceptions) and must not `longjmp` out.
 - **Threads.** Models and renderers may be created and used on any thread,
   but a renderer must not be used by two threads at once. Rendering is
-  single-threaded and deterministic: the same model, options and time give
-  the same pixels.
+  deterministic: the same model, options and time give the same pixels.
+  `options.threads` (default 1) splits each frame into horizontal bands
+  rendered on that many worker threads, which never changes the output.
 - **Pixels.** `p3b_render_frame` writes `height` rows of `width * 4` bytes,
   `stride` bytes apart, and never touches the padding beyond each row.
   `dst_len` must be at least `stride * (height - 1) + width * 4`. With

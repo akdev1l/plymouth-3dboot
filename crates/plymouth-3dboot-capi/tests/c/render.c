@@ -74,6 +74,14 @@ int main(int argc, char **argv) {
     CHECK_STATUS(p3b_render_frame(renderer, 1.0, b, sizeof b, STRIDE, P3B_PIXEL_FORMAT_RGBA8888), P3B_STATUS_OK);
     CHECK(memcmp(a, b, sizeof a) != 0);
 
+    /* Threads do not change the output. */
+    p3b_renderer_free(renderer);
+    options.threads = 4;
+    CHECK_STATUS(p3b_renderer_new(model, 0, W, H, &options, &renderer), P3B_STATUS_OK);
+    CHECK_STATUS(p3b_render_frame(renderer, 1.0, a, sizeof a, STRIDE, P3B_PIXEL_FORMAT_RGBA8888), P3B_STATUS_OK);
+    for (int y = 0; y < H; y++)
+        CHECK(memcmp(a + y * STRIDE, b + y * STRIDE, W * 4) == 0);
+
     p3b_renderer_free(renderer);
     p3b_model_free(model);
     puts("render: ok");

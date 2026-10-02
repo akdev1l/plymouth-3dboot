@@ -186,6 +186,11 @@ impl DepthBuffer {
     pub fn values(&self) -> &[f32] {
         &self.0.data
     }
+
+    /// All values, row-major, mutably.
+    pub fn values_mut(&mut self) -> &mut [f32] {
+        &mut self.0.data
+    }
 }
 
 /// A colour buffer and a depth buffer of the same size.
