@@ -134,6 +134,15 @@ capi-header:
     cargo cbuild --locked -p plymouth-3dboot-capi --target-dir target/capi
     cp target/capi/x86_64-unknown-linux-gnu/debug/include/plymouth-3dboot.h crates/plymouth-3dboot-capi/include/
 
+# Run the criterion benchmarks (native, not part of check).
+bench *args:
+    cargo bench --locked -p plymouth-3dboot --bench render -- "$@"
+
+# Median frame time natively and as WebAssembly under node.
+bench-wasm:
+    cargo run --locked --release -q -p plymouth-3dboot --example frame_timing
+    cargo run --locked --release -q -p plymouth-3dboot --example frame_timing --target {{wasm_target}}
+
 # Licence, advisory, ban and source policy (deny.toml).
 deny:
     cargo deny --locked check

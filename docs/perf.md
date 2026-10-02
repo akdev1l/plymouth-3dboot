@@ -31,3 +31,22 @@ single-threaded, on an AMD Ryzen 7 5800X:
 At 1080p the renderer is just below the plugin's default 30 fps. The
 time-based animation stays correct; slower machines show fewer frames.
 Phase 13 (tiled and parallel rasterization) targets this.
+
+## Benchmarks
+
+`just bench` runs the criterion benchmarks in `crates/plymouth-3dboot/benches/`.
+`just bench-wasm` prints the median N64 frame time at 640×480 natively and
+under node (wasm). Baseline (2026-10-01, Ryzen 7 5800X, before the
+optimizations in Phase 13.3):
+
+| Benchmark | Time |
+|---|---|
+| `triangle_setup` | 29 ns |
+| `coverage_256px_triangle_area` | 27 µs |
+| `fill_1080p_quad` (2 triangles, every pixel) | 71 ms |
+| `n64_frame_640x480` | 6.3 ms |
+| `n64_frame_1080p` | 32.8 ms |
+| `n64_frame_640x480_aa2` | 33.0 ms |
+| `frame_timing`, native / wasm (node) | 6.6 ms / 8.6 ms |
+
+Fragment processing dominates: about 35 ns per pixel for a flat quad.

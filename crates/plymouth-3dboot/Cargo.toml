@@ -26,5 +26,13 @@ gif = ["dep:gif"]
 plymouth-3dboot-testutil.workspace = true
 proptest.workspace = true
 
+# Benchmarks run natively only.
+[target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "render"
+harness = false
+
 [lints]
 workspace = true
