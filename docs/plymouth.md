@@ -106,3 +106,30 @@ spare VT.
   compares the drawn frames with `p3b_render_frame` output for the same
   time, and runs under valgrind.
 - **Manual:** a VM boot, following the checklist below once it is written.
+
+## VM verification checklist
+
+Manual; not automated, and **not yet performed**. Run it in a Fedora VM
+(QEMU/KVM with `virtio-gpu`, or `simpledrm` firmware framebuffer) with the
+library, plugin and theme installed as described above:
+
+1. `plymouth-set-default-theme -R 3dboot-n64` succeeds, and
+   `lsinitrd | grep -E 'plymouth-3dboot|plymouth_3dboot|3dboot-n64'` lists
+   the plugin, the library and the theme files.
+2. **Boot:** the spinning N64 logo appears on a black background and turns
+   smoothly (one revolution per 3.3 s, from the model's own animation) until
+   the display manager starts.
+3. **LUKS:** with an encrypted root, the password prompt appears below the
+   logo, typing shows bullets, wrong passwords are re-prompted, and the
+   animation keeps running throughout. Needs a label plugin
+   (`plymouth-plugin-label` on Fedora).
+4. **Messages:** `plymouth display-message --text="Hello"` shows the text;
+   `plymouth hide-message --text="Hello"` hides it.
+5. **Shutdown/reboot:** the splash appears with the same animation.
+6. **Multiple monitors:** each display shows the logo framed for its own
+   size.
+7. **Failure modes:** with `ModelFile` pointing to a missing file, boot falls
+   back to Plymouth's default text splash, and the debug log contains
+   `plymouth-3dboot: cannot load`.
+8. **Resources:** `plymouthd` CPU use stays reasonable for the resolution
+   (see [perf.md](perf.md)), and no crash appears in the journal.
