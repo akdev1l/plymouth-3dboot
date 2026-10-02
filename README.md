@@ -50,6 +50,15 @@ example `dnf install SDL3-devel`. The container has no display, so
 - R resets the view;
 - Escape or Q quits.
 
+### Offline rendering
+
+```sh
+cargo run -p plymouth-3dboot --example animate -- MODEL --out spin.gif   # or --out frames/
+```
+
+The example renders a model's animation (or a turntable) to an animated GIF
+or to numbered PNG frames. See the file header for options.
+
 Pinned versions and WebAssembly notes are in [`docs/toolchain.md`](docs/toolchain.md).
 Coordinate, pixel and colour conventions are in [`docs/conventions.md`](docs/conventions.md).
 

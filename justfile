@@ -15,7 +15,7 @@ default:
     @just --list
 
 # Full quality gate; must pass before and after every change.
-check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl browser-smoke deny
+check: fmt-check clippy test doc build-wasm test-wasm smoke-sdl smoke-example browser-smoke deny
 
 # Format all code.
 fmt:
@@ -72,6 +72,13 @@ viewer-web:
 # Load the web viewer in headless Chromium and check what it renders.
 browser-smoke: viewer-web
     PLYMOUTH_BROWSER=chromium-headless-shell cargo nextest run --locked -p plymouth-3dboot-viewer --test browser --no-capture
+
+# Render the animated N64 sample offline to a GIF and PNG frames.
+smoke-example:
+    rm -rf target/tmp/animate && mkdir -p target/tmp/animate
+    cargo run --locked -q -p plymouth-3dboot --example animate -- tests/fixtures/n64_logo/n64_logo_spin.dae --out target/tmp/animate/spin.gif --frames 4 --size 64x64
+    cargo run --locked -q -p plymouth-3dboot --example animate -- tests/fixtures/n64_logo/n64_logo.obj --out target/tmp/animate/frames --frames 2 --size 32x32 --shading lambert
+    test -s target/tmp/animate/spin.gif && test -s target/tmp/animate/frames/frame0001.png
 
 # Licence, advisory, ban and source policy (deny.toml).
 deny:
