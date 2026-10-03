@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # plymouth-3dboot
 
+[![RPM](https://github.com/akdev1l/plymouth-3dboot/actions/workflows/rpm.yml/badge.svg?branch=main&event=push)](https://github.com/akdev1l/plymouth-3dboot/actions/workflows/rpm.yml?query=branch%3Amain)
+[![Builder image](https://github.com/akdev1l/plymouth-3dboot/actions/workflows/builder-image.yml/badge.svg?branch=main)](https://github.com/akdev1l/plymouth-3dboot/actions/workflows/builder-image.yml?query=branch%3Amain)
+
 A CPU rasterizer for animated 3D models, written in Rust, for use in a
 [Plymouth](https://gitlab.freedesktop.org/plymouth/plymouth) boot-splash theme.
 
@@ -29,7 +32,7 @@ builds the Fedora RPMs ([packaging/](packaging/plymouth-3dboot.spec)):
 scripts/dev.sh just check    # full quality gate (builds the image on first use)
 scripts/dev.sh just --list   # all recipes
 scripts/dev.sh               # interactive shell
-DEV_CONTAINER=fedora scripts/dev.sh just rpm   # Fedora RPMs in dist/rpm/
+DEV_CONTAINER=fedora scripts/dev.sh just rpm   # Fedora RPMs in dist/rpm/ (also built by CI)
 ```
 
 ### Viewer

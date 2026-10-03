@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Builds the Fedora builder image (Containerfile.fedora) and pushes it to
+# ghcr.io/<owner>/plymouth-3dboot-builder-fedora, tagged with the content
+# hash that scripts/dev.sh uses locally (`DEV_CONTAINER=fedora
+# scripts/dev.sh --image`) and with `latest`. The RPM workflow pulls the
+# image for its commit's hash.
+name: Builder image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Containerfile.fedora
+      - rust-toolchain.toml
+      - .github/workflows/builder-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: builder-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and push
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image
+        id: build
+        run: |
+          local_image="$(DEV_CONTAINER=fedora scripts/dev.sh --image)"
+          remote="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/plymouth-3dboot-builder-fedora"
+          tag="${local_image##*:}"
+          # Like scripts/dev.sh, build from an empty context.
+          context="$(mktemp -d)"
+          podman build --pull \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "${remote}:${tag}" -t "${remote}:latest" \
+            -f Containerfile.fedora "${context}"
+          echo "remote=${remote}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Push to ghcr.io
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REMOTE: ${{ steps.build.outputs.remote }}
+          TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          echo "${REGISTRY_TOKEN}" | podman login ghcr.io -u "${REGISTRY_USER}" --password-stdin
+          podman push "${REMOTE}:${TAG}"
+          podman push "${REMOTE}:latest"

@@ -22,7 +22,7 @@ fi
 spec=packaging/plymouth-3dboot.spec
 version="$(sed -n 's/^Version: *//p' "${spec}")"
 cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
-meson_version="$(sed -n "s/^  version: '\(.*\)',\$/\1/p" plymouth/meson.build)"
+meson_version="$(sed -n "s/^  version: '\([^']*\)'.*/\1/p" plymouth/meson.build)"
 if [[ "${version}" != "${cargo_version}" || "${version}" != "${meson_version}" ]]; then
     echo "build-rpm.sh: versions differ: spec ${version}, Cargo.toml ${cargo_version}, meson.build ${meson_version}" >&2
     exit 1

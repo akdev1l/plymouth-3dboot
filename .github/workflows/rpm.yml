@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Builds the RPMs with `just rpm` in the Fedora builder image, exactly as
+# `DEV_CONTAINER=fedora scripts/dev.sh just rpm` does locally (the build
+# runs the plugin's harness in %check). Runs on pull requests (the PR
+# check), on pushes to main, on demand, and from release.yml for releases;
+# the RPMs are uploaded as the `rpms` artifact.
+#
+# The builder image comes from ghcr.io (see builder-image.yml) under the
+# content hash of Containerfile.fedora. When a pull request changes the
+# Containerfile, no image exists for the new hash yet, and scripts/dev.sh
+# builds it in the job instead.
+name: RPM
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: rpm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rpm:
+    name: Build RPMs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Get the builder image
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          local_image="$(DEV_CONTAINER=fedora scripts/dev.sh --image)"
+          remote="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/plymouth-3dboot-builder-fedora:${local_image##*:}"
+          # Logging in is only needed while the package is private.
+          echo "${REGISTRY_TOKEN}" | podman login ghcr.io -u "${REGISTRY_USER}" --password-stdin || true
+          if podman pull "${remote}"; then
+            podman tag "${remote}" "${local_image}"
+          else
+            echo "::notice::No builder image ${remote}; scripts/dev.sh builds it from Containerfile.fedora."
+          fi
+
+      - name: Build the RPMs
+        run: DEV_CONTAINER=fedora scripts/dev.sh just rpm
+
+      - name: Upload the RPMs
+        uses: actions/upload-artifact@v7
+        with:
+          name: rpms
+          path: dist/rpm/*.rpm
+          if-no-files-found: error

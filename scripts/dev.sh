@@ -5,6 +5,8 @@
 #
 #   scripts/dev.sh <command> [args...]    e.g. scripts/dev.sh just check
 #   scripts/dev.sh                         interactive shell
+#   scripts/dev.sh --image                 print the image tag and exit (CI
+#                                          pulls a prebuilt image under it)
 #
 # The image is tagged with a hash of its inputs (Containerfile and
 # rust-toolchain.toml), and is rebuilt automatically when either changes.
@@ -41,6 +43,11 @@ esac
 hash="$(cat "${containerfile}" "${repo_root}/rust-toolchain.toml" | sha256sum | cut -c1-12)"
 image="${image_name}:${hash}"
 emcache_volume="${image_name}-emcache-${hash}"
+
+if [[ "${1:-}" == "--image" ]]; then
+    echo "${image}"
+    exit 0
+fi
 
 if ! podman image exists "${image}"; then
     echo "dev.sh: building ${image} (inputs changed or image missing)" >&2

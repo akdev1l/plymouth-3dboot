@@ -30,6 +30,45 @@ container mounts its own volume on `target/`, so its build outputs never mix
 with the Debian container's. It has no Emscripten or SDL: `just check` stays
 in the Debian container.
 
+## Continuous integration (GitHub Actions)
+
+- [`builder-image.yml`](../.github/workflows/builder-image.yml) builds
+  `Containerfile.fedora` and pushes it to
+  `ghcr.io/<owner>/plymouth-3dboot-builder-fedora`, tagged with the content
+  hash from `DEV_CONTAINER=fedora scripts/dev.sh --image` and with `latest`.
+  It runs when `Containerfile.fedora`, `rust-toolchain.toml` or the workflow
+  change on `main`, and on demand (*Run workflow*).
+- [`rpm.yml`](../.github/workflows/rpm.yml) runs `just rpm` through
+  `scripts/dev.sh`, as locally, on pull requests (the PR check, *Build
+  RPMs*), on pushes to `main` and on demand, and uploads the RPMs as the
+  `rpms` artifact. It pulls the builder image for the commit's hash; if
+  there is none (a pull request that changes `Containerfile.fedora`),
+  `scripts/dev.sh` builds the image in the job.
+
+- [`release.yml`](../.github/workflows/release.yml) runs release-please on
+  every push to `main` ([`release-please-config.json`](../release-please-config.json),
+  [`.release-please-manifest.json`](../.release-please-manifest.json)). It
+  keeps a release pull request open that updates `CHANGELOG.md` from the
+  conventional commits and bumps the version in `Cargo.toml`, `Cargo.lock`
+  (the workspace crates, which have no `source`), `plymouth/meson.build`
+  and the RPM spec (marked with `x-release-please-version` comments).
+  Merging it tags `vX.Y.Z`, creates the GitHub release and attaches the RPMs
+  built at that commit. Before 1.0, `feat` commits bump the minor version
+  and breaking changes too (`bump-minor-pre-major`); the first release is
+  0.1.0.
+
+The image package is created on the first run of `builder-image.yml`.
+Pull requests from forks can only pull it if the package is public
+(package settings on GitHub); otherwise their jobs build the image
+themselves, which works but takes longer. To make the check required, add
+*Build RPMs* to the branch protection rules of `main`.
+
+Pull requests opened with the default `GITHUB_TOKEN`, like release-please's,
+do not trigger other workflows, so the *Build RPMs* check does not run on
+the release pull request. If that check is required, give release-please a
+personal access token or GitHub App token (the action's `token` input), or
+merge the release pull request as an administrator.
+
 ## Version matrix
 
 | Component | Version | Notes |

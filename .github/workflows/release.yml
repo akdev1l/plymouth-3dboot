@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# release-please (release-please-config.json, .release-please-manifest.json)
+# keeps a release pull request open from the conventional commits on main:
+# it updates CHANGELOG.md and the version in Cargo.toml, Cargo.lock,
+# plymouth/meson.build and the RPM spec. Merging it tags vX.Y.Z and creates
+# a GitHub release, to which the RPMs built at that commit are attached.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release PR
+    runs-on: ubuntu-24.04
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  rpm:
+    name: RPMs
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/rpm.yml
+
+  attach:
+    name: Attach RPMs to the release
+    needs: [release-please, rpm]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: rpms
+          path: rpms
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "${TAG}" rpms/*.rpm --clobber
