@@ -17,7 +17,7 @@ use crate::color::LinearRgba;
 use crate::math::{Mat3, Mat4, Vec3};
 use crate::pipeline::{DrawError, DrawStats, RenderState, Renderer};
 use crate::raster::CullMode;
-use crate::scene::{Camera, Material, Mesh, Scene};
+use crate::scene::{Camera, Material, Mesh, NodeId, Scene};
 use crate::target::Framebuffer;
 
 /// A light infinitely far away, shining in one direction.
@@ -212,14 +212,38 @@ pub fn draw_scene(
     scene: &Scene,
     world: &[Mat4],
 ) -> Result<DrawStats, ShadeError> {
+    draw_nodes(renderer, target, state, params, scene, world, |_| true)
+}
+
+/// Like [`draw_scene`], but draws only the mesh nodes for which `include`
+/// returns true.
+///
+/// # Errors
+///
+/// Stops at the first mesh that fails; see [`draw_mesh`].
+///
+/// # Panics
+///
+/// Panics if `world` does not have one matrix per node.
+pub fn draw_nodes(
+    renderer: &mut Renderer,
+    target: &mut Framebuffer,
+    state: &RenderState,
+    params: &DrawParams<'_>,
+    scene: &Scene,
+    world: &[Mat4],
+    include: impl Fn(NodeId) -> bool,
+) -> Result<DrawStats, ShadeError> {
     assert_eq!(
         world.len(),
         scene.nodes().len(),
         "one world matrix per node"
     );
     let mut total = DrawStats::default();
-    for (node, m) in scene.nodes().iter().zip(world) {
-        if let Some(mesh) = node.mesh {
+    for (i, (node, m)) in scene.nodes().iter().zip(world).enumerate() {
+        if let Some(mesh) = node.mesh
+            && include(NodeId(i))
+        {
             total += draw_mesh(renderer, target, state, params, &scene.meshes()[mesh.0], *m)?;
         }
     }

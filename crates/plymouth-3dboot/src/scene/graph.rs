@@ -132,6 +132,12 @@ pub struct Node {
     pub mesh: Option<MeshId>,
     /// A camera placed at this node (looking down its local −Z), if any.
     pub camera: Option<Projection>,
+    /// Scenery, such as a floor: fixed in the world rather than part of the
+    /// model. It applies to the node's descendants too. Camera framing
+    /// ignores scenery, [`Scene::wrapped_in_root`] leaves it outside the new
+    /// root, and renderers draw it as background that only needs redrawing
+    /// where the moving model changed the image.
+    pub scenery: bool,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
 }
@@ -158,6 +164,13 @@ impl Node {
     #[must_use]
     pub fn with_camera(mut self, projection: Projection) -> Self {
         self.camera = Some(projection);
+        self
+    }
+
+    /// Marks the node as scenery (see [`Node::scenery`]).
+    #[must_use]
+    pub fn as_scenery(mut self) -> Self {
+        self.scenery = true;
         self
     }
 
@@ -242,8 +255,9 @@ impl Scene {
     }
 
     /// A copy of the scene with a new node `root` as the parent of all
-    /// current roots. Returns the new scene and the root's id (always
-    /// `NodeId(0)`); every other node's id increases by one.
+    /// current roots except scenery, which stays fixed in the world. Returns
+    /// the new scene and the root's id (always `NodeId(0)`); every other
+    /// node's id increases by one.
     ///
     /// Useful for animating a whole model, e.g. with
     /// [`crate::anim::Clip::turntable`].
@@ -265,8 +279,12 @@ impl Scene {
             )
             .expect("no references");
         for node in &self.nodes {
-            let parent = node.parent.map_or(root_id, |p| NodeId(p.0 + 1));
-            out.add_node(Some(parent), node.clone())
+            let parent = match node.parent {
+                Some(p) => Some(NodeId(p.0 + 1)),
+                None if node.scenery => None,
+                None => Some(root_id),
+            };
+            out.add_node(parent, node.clone())
                 .expect("parents precede children");
         }
         (out, root_id)
@@ -379,6 +397,37 @@ impl Scene {
     #[must_use]
     pub fn bounds(&self) -> Aabb {
         self.bounds_with(&self.world_matrices())
+    }
+
+    /// Whether node `id` is scenery: marked so itself or below a node that
+    /// is (see [`Node::scenery`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` is out of range.
+    #[must_use]
+    pub fn is_scenery(&self, id: NodeId) -> bool {
+        let mut node = Some(id);
+        while let Some(n) = node {
+            if self.nodes[n.0].scenery {
+                return true;
+            }
+            node = self.nodes[n.0].parent;
+        }
+        false
+    }
+
+    /// World-space bounds of the mesh instances that are not scenery: the
+    /// model itself, given world matrices.
+    #[must_use]
+    pub fn model_bounds_with(&self, world: &[Mat4]) -> Aabb {
+        self.nodes
+            .iter()
+            .zip(world)
+            .enumerate()
+            .filter(|&(i, _)| !self.is_scenery(NodeId(i)))
+            .filter_map(|(_, (n, m))| n.mesh.map(|id| self.meshes[id.0].bounds().transformed(m)))
+            .fold(Aabb::EMPTY, Aabb::union)
     }
 }
 
@@ -681,5 +730,47 @@ mod tests {
         assert_eq!(posed[b.0].transform_point3(Vec3::ZERO), Vec3::Z);
         // The hierarchy is untouched by transform changes.
         assert_eq!(s.nodes()[b.0].parent(), Some(a));
+    }
+
+    #[test]
+    fn scenery_is_inherited_excluded_from_model_bounds_and_not_wrapped() {
+        let mut scene = Scene::new();
+        let mesh = scene.add_mesh(cube(1.0));
+        let model = scene
+            .add_node(
+                None,
+                Node::new("model", LocalTransform::default()).with_mesh(mesh),
+            )
+            .unwrap();
+        let far = trs(Vec3::new(10.0, 0.0, 0.0), Quat::IDENTITY, Vec3::ONE);
+        let floor = scene
+            .add_node(None, Node::new("floor", far).as_scenery())
+            .unwrap();
+        let child = scene
+            .add_node(
+                Some(floor),
+                Node::new("tile", LocalTransform::default()).with_mesh(mesh),
+            )
+            .unwrap();
+        assert!(!scene.is_scenery(model));
+        assert!(
+            scene.is_scenery(floor) && scene.is_scenery(child),
+            "inherited"
+        );
+        assert_eq!(
+            scene.model_bounds_with(&scene.world_matrices()),
+            Aabb::new(Vec3::splat(-1.0), Vec3::splat(1.0))
+        );
+        assert_eq!(scene.bounds().max.x, 11.0);
+
+        let (wrapped, root) = scene.wrapped_in_root(Node::new("spin", LocalTransform::default()));
+        assert_eq!(
+            wrapped.nodes()[1].parent(),
+            Some(root),
+            "the model moves with the root"
+        );
+        assert_eq!(wrapped.nodes()[2].parent(), None, "scenery stays a root");
+        assert_eq!(wrapped.nodes()[3].parent(), Some(NodeId(2)));
+        assert!(wrapped.is_scenery(NodeId(3)));
     }
 }

@@ -170,3 +170,29 @@ fn obj_unlit_antialiased() {
     );
     golden!().assert("n64_obj_unlit_aa4", image, Tolerance::EXACT);
 }
+
+/// The spinning logo over a floor, against a sky-blue background (as the
+/// Plymouth theme shows it).
+#[test]
+fn spin_with_floor_and_sky() {
+    use plymouth_3dboot::color::Rgba8;
+    use plymouth_3dboot::{FrameSettings, Model, WrapMode};
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/n64_logo/n64_logo_spin.dae"
+    );
+    let model = Model::load(path)
+        .unwrap()
+        .with_floor(Rgba8::new(0xC8, 0xC8, 0xC8, 255), 4.0);
+    let settings = FrameSettings {
+        background: Rgba8::new(0x87, 0xCE, 0xEB, 255),
+        antialias: 2,
+        ..FrameSettings::new(160, 120)
+    };
+    let mut renderer = model.renderer(Some(0), WrapMode::Loop, settings).unwrap();
+    golden!().assert(
+        "n64_spin_floor_sky",
+        renderer.render_at(0.4).unwrap(),
+        Tolerance::EXACT,
+    );
+}

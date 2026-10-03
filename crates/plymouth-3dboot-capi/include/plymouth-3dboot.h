@@ -241,8 +241,8 @@ enum p3b_status p3b_model_add_turntable(struct p3b_model *model,
                                         float z,
                                         float period);
 
-// Stores the model's bounding box at rest (world units) in `min[3]` and
-// `max[3]`.
+// Stores the model's bounding box at rest (world units, without a floor
+// added by `p3b_model_add_floor`) in `min[3]` and `max[3]`.
 //
 // # Safety
 //
@@ -264,6 +264,18 @@ size_t p3b_model_warning_count(const struct p3b_model *model);
 //
 // `model` must be NULL or a live model.
 const char *p3b_model_warning(const struct p3b_model *model, size_t index);
+
+// Adds a floor under the model: a square of the sRGB colour `rgb` (3
+// bytes) just below the model's lowest point over its clips, with a half
+// extent of `size` (> 0) times the model's horizontal radius. Add it after
+// any turntable. The floor stays fixed while the model moves, is ignored
+// when framing the camera, and costs little per frame.
+//
+// # Safety
+//
+// `model` must be NULL or a live model not used by a renderer; `rgb` must
+// point to 3 readable bytes.
+enum p3b_status p3b_model_add_floor(struct p3b_model *model, const uint8_t *rgb, float size);
 
 // The default options: unlit shading on opaque black, back-face culling,
 // looping, and a camera framing the model from the front right, slightly

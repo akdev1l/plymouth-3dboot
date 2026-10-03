@@ -124,7 +124,11 @@ static bool near(double a, double b) { return a - b < 1e-6 && b - a < 1e-6; }
 static void expected_frame(const char *model_path, double t, uint32_t *out) {
     p3b_model *model = NULL;
     CHECK(p3b_model_load_file(model_path, &model) == P3B_STATUS_OK);
+    const uint8_t floor[3] = {0xC8, 0xC8, 0xC8}; /* as in the harness theme */
+    CHECK(p3b_model_add_floor(model, floor, 4.0f) == P3B_STATUS_OK);
     p3b_render_options options = p3b_render_options_default();
+    const uint8_t sky[4] = {0x87, 0xCE, 0xEB, 0xFF};
+    memcpy(options.background, sky, sizeof sky);
     p3b_renderer *renderer = NULL;
     CHECK(p3b_renderer_new(model, 0, W, H, &options, &renderer) == P3B_STATUS_OK);
     CHECK(p3b_render_frame(renderer, t, (uint8_t *) out, W * H * 4, W * 4, P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED) ==
@@ -160,7 +164,9 @@ int main(int argc, char **argv) {
     CHECK(fd >= 0);
     FILE *f = fdopen(fd, "w");
     CHECK(f != NULL);
-    fprintf(f, "[Plymouth Theme]\nModuleName=plymouth-3dboot\n\n[plymouth-3dboot]\nModelFile=%s\nFramesPerSecond=30\n",
+    fprintf(f,
+            "[Plymouth Theme]\nModuleName=plymouth-3dboot\n\n[plymouth-3dboot]\nModelFile=%s\nFramesPerSecond=30\n"
+            "BackgroundColor=87CEEB\nFloorColor=C8C8C8\nFloorSize=4\n",
             model_path);
     fclose(f);
     ply_key_file_t *key_file = ply_key_file_new(theme);

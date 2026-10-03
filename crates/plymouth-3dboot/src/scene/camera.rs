@@ -89,6 +89,32 @@ impl Camera {
         self.world.transform_point3(Vec3::ZERO)
     }
 
+    /// The camera with its near and far planes moved out, if needed, so
+    /// that nothing within `bounds` is clipped by them. The near plane of a
+    /// perspective camera moves at most to a quarter of its distance, which
+    /// keeps depth precision.
+    #[must_use]
+    pub fn enclosing(mut self, bounds: Aabb) -> Self {
+        if bounds.is_empty() {
+            return self;
+        }
+        let view = self.world.inverse();
+        let depths = bounds.corners().map(|p| -view.transform_point3(p).z);
+        let nearest = depths.iter().copied().fold(f32::INFINITY, f32::min);
+        let farthest = depths.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        match &mut self.projection {
+            Projection::Perspective { z_near, z_far, .. } => {
+                *z_far = z_far.max(farthest * 1.01);
+                *z_near = z_near.min((nearest * 0.99).max(*z_near * 0.25));
+            }
+            Projection::Orthographic { z_near, z_far, .. } => {
+                *z_far = z_far.max(farthest + (farthest - nearest).abs() * 0.01);
+                *z_near = z_near.min(nearest - (farthest - nearest).abs() * 0.01);
+            }
+        }
+        self
+    }
+
     /// A camera that sees all of `bounds` from `direction` (pointing from the
     /// camera towards the scene), for a viewport of the given `aspect`.
     ///
@@ -224,5 +250,34 @@ mod tests {
             let cam = Camera::framing(bounds, dir, Vec3::Y, aspect, fov);
             assert_inside_ndc(&cam, aspect, bounds);
         }
+    }
+
+    #[test]
+    fn enclosing_widens_near_and_far_only_as_needed() {
+        let projection = Projection::Perspective {
+            fov_y: 0.8,
+            z_near: 4.0,
+            z_far: 6.0,
+        };
+        let camera = Camera::look_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::Y, projection);
+        let planes = |c: Camera| match c.projection {
+            Projection::Perspective { z_near, z_far, .. } => (z_near, z_far),
+            Projection::Orthographic { .. } => unreachable!(),
+        };
+        assert_eq!(
+            planes(camera.enclosing(Aabb::new(Vec3::splat(-0.5), Vec3::splat(0.5)))),
+            (4.0, 6.0)
+        );
+        let (near, far) = planes(camera.enclosing(Aabb::new(
+            Vec3::new(-1.0, -1.0, -5.0),
+            Vec3::new(1.0, 1.0, 3.0),
+        )));
+        assert!((near - 1.98).abs() < 1e-5, "{near}");
+        assert!((far - 10.1).abs() < 1e-4, "{far}");
+        // Behind the camera: the near plane stops at a quarter.
+        let (near, _) =
+            planes(camera.enclosing(Aabb::new(Vec3::splat(-1.0), Vec3::new(1.0, 1.0, 9.0))));
+        assert_eq!(near, 1.0);
+        assert_eq!(camera.enclosing(Aabb::EMPTY), camera);
     }
 }

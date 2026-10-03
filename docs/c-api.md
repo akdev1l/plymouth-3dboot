@@ -84,6 +84,10 @@ A complete program is in
   `P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED`, each pixel is a native-endian
   `uint32_t` `0xAARRGGBB` with premultiplied colour, which is Plymouth's
   `ply_pixel_buffer` format.
+- **Floor.** `p3b_model_add_floor(model, rgb, size)` adds a floor of an sRGB
+  colour under the model (call it after `p3b_model_add_turntable`). Renderers
+  draw it once and afterwards only where the model moved, so a floor barely
+  changes the cost of a frame.
 - **Partial updates.** `p3b_render_frame_incremental` takes the same
   arguments plus a `p3b_rect *damage`. It writes only the pixels that changed
   since the renderer's previous frame and returns their bounding rectangle,

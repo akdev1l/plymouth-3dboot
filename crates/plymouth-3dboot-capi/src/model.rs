@@ -3,6 +3,7 @@
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
+use plymouth_3dboot::color::Rgba8;
 use plymouth_3dboot::io::obj::ObjLoadError;
 use plymouth_3dboot::io::{ResolveError, ResourceResolver};
 use plymouth_3dboot::math::Vec3;
@@ -294,8 +295,8 @@ pub unsafe extern "C" fn p3b_model_add_turntable(
     })
 }
 
-/// Stores the model's bounding box at rest (world units) in `min[3]` and
-/// `max[3]`.
+/// Stores the model's bounding box at rest (world units, without a floor
+/// added by `p3b_model_add_floor`) in `min[3]` and `max[3]`.
 ///
 /// # Safety
 ///
@@ -313,7 +314,8 @@ pub unsafe extern "C" fn p3b_model_bounds(
         if min.is_null() || max.is_null() {
             return Err((p3b_status::NullPointer, "min or max is NULL".into()));
         }
-        let b = m.model.scene.bounds();
+        let scene = &m.model.scene;
+        let b = scene.model_bounds_with(&scene.world_matrices());
         if b.is_empty() {
             return Err((
                 p3b_status::InvalidArgument,
@@ -352,6 +354,50 @@ pub unsafe extern "C" fn p3b_model_warning(model: *const p3b_model, index: usize
     unsafe { model.as_ref() }
         .and_then(|m| m.warnings.get(index))
         .map_or(std::ptr::null(), |w| w.as_ptr())
+}
+
+/// Adds a floor under the model: a square of the sRGB colour `rgb` (3
+/// bytes) just below the model's lowest point over its clips, with a half
+/// extent of `size` (> 0) times the model's horizontal radius. Add it after
+/// any turntable. The floor stays fixed while the model moves, is ignored
+/// when framing the camera, and costs little per frame.
+///
+/// # Safety
+///
+/// `model` must be NULL or a live model not used by a renderer; `rgb` must
+/// point to 3 readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn p3b_model_add_floor(
+    model: *mut p3b_model,
+    rgb: *const u8,
+    size: f32,
+) -> p3b_status {
+    ffi_guard(|| {
+        // SAFETY: NULL-checked; otherwise live and exclusively ours (contract).
+        let m = unsafe { model.as_mut() }
+            .ok_or_else(|| (p3b_status::NullPointer, "model is NULL".into()))?;
+        if rgb.is_null() {
+            return Err((p3b_status::NullPointer, "rgb is NULL".into()));
+        }
+        if !(size.is_finite() && size > 0.0) {
+            return Err((
+                p3b_status::InvalidArgument,
+                "the size must be positive".into(),
+            ));
+        }
+        // SAFETY: non-NULL and 3 readable bytes (contract).
+        let [r, g, b] = unsafe { rgb.cast::<[u8; 3]>().read_unaligned() };
+        let model = std::mem::replace(
+            &mut m.model,
+            Model {
+                scene: Default::default(),
+                clips: Vec::new(),
+                warnings: Vec::new(),
+            },
+        );
+        m.model = model.with_floor(Rgba8::new(r, g, b, 255), size);
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -398,6 +444,38 @@ mod tests {
             assert_eq!(
                 p3b_model_add_turntable(m, 0.0, 0.0, 0.0, 4.0),
                 p3b_status::InvalidArgument
+            );
+            let (mut lo0, mut hi0) = ([0.0f32; 3], [0.0f32; 3]);
+            assert_eq!(
+                p3b_model_bounds(m, lo0.as_mut_ptr(), hi0.as_mut_ptr()),
+                p3b_status::Ok
+            );
+            let grey = [200u8, 200, 200];
+            assert_eq!(
+                p3b_model_add_floor(m, grey.as_ptr(), 0.0),
+                p3b_status::InvalidArgument
+            );
+            assert_eq!(
+                p3b_model_add_floor(m, std::ptr::null(), 4.0),
+                p3b_status::NullPointer
+            );
+            assert_eq!(
+                p3b_model_add_floor(std::ptr::null_mut(), grey.as_ptr(), 4.0),
+                p3b_status::NullPointer
+            );
+            let nodes = (*m).model.scene.nodes().len();
+            assert_eq!(p3b_model_add_floor(m, grey.as_ptr(), 4.0), p3b_status::Ok);
+            assert_eq!((*m).model.scene.nodes().len(), nodes + 1);
+            assert_eq!(p3b_model_clip_count(m), 2, "a floor adds no clip");
+            let (mut lo1, mut hi1) = ([0.0f32; 3], [0.0f32; 3]);
+            assert_eq!(
+                p3b_model_bounds(m, lo1.as_mut_ptr(), hi1.as_mut_ptr()),
+                p3b_status::Ok
+            );
+            assert_eq!(
+                (lo0, hi0),
+                (lo1, hi1),
+                "the floor is not part of the model's bounds"
             );
             let (mut lo, mut hi) = ([0.0f32; 3], [0.0f32; 3]);
             assert_eq!(

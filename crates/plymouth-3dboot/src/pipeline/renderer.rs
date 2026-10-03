@@ -54,16 +54,21 @@ pub struct RenderState {
     pub cull: CullMode,
     /// Depth testing.
     pub depth: DepthState,
+    /// If set, only pixels within this rectangle (and the viewport) are
+    /// drawn; the viewport still maps NDC.
+    pub scissor: Option<Rect>,
 }
 
 impl RenderState {
-    /// Defaults for `viewport`: no culling, `Less` depth test with writes.
+    /// Defaults for `viewport`: no culling, `Less` depth test with writes,
+    /// no scissor.
     #[must_use]
     pub fn new(viewport: Viewport) -> Self {
         Self {
             viewport,
             cull: CullMode::None,
             depth: DepthState::default(),
+            scissor: None,
         }
     }
 }
@@ -314,7 +319,8 @@ impl Renderer {
             x1: vp.x.saturating_add(vp.width),
             y1: vp.y.saturating_add(vp.height),
         }
-        .intersect(&Rect::from_size(target.width(), target.height()));
+        .intersect(&Rect::from_size(target.width(), target.height()))
+        .intersect(&state.scissor.unwrap_or(Rect::from_size(u32::MAX, u32::MAX)));
         let mut clipper = Clipper::new();
         let mut stats = DrawStats {
             triangles: indices.len() / 3,
@@ -746,5 +752,52 @@ mod tests {
         }
         assert_eq!(Renderer::with_threads(0).threads(), 1);
         assert_eq!(Renderer::with_threads(1000).threads(), MAX_THREADS);
+    }
+
+    #[test]
+    fn scissor_limits_drawing_without_moving_the_image() {
+        let full = {
+            let mut target = fb(8, 6);
+            draw(
+                &mut target,
+                &RenderState::new(Viewport::new(8, 6)),
+                &red_quad(),
+                4,
+                &QUAD,
+            )
+            .unwrap();
+            target
+        };
+        let mut target = fb(8, 6);
+        let mut state = RenderState::new(Viewport::new(8, 6));
+        let scissor = Rect {
+            x0: 2,
+            y0: 1,
+            x1: 5,
+            y1: 9,
+        };
+        state.scissor = Some(scissor);
+        let stats = draw(&mut target, &state, &red_quad(), 4, &QUAD).unwrap();
+        assert_eq!(stats.fragments_written, 3 * 5);
+        assert_eq!(
+            stats.bounds,
+            Rect {
+                x0: 2,
+                y0: 1,
+                x1: 5,
+                y1: 6
+            }
+        );
+        for y in 0..6 {
+            for x in 0..8 {
+                let inside = (2..5).contains(&x) && y >= 1;
+                let want = if inside {
+                    full.color.get(x, y)
+                } else {
+                    fb(8, 6).color.get(x, y)
+                };
+                assert_eq!(target.color.get(x, y), want, "({x}, {y})");
+            }
+        }
     }
 }

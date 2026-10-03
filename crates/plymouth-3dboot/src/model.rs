@@ -4,12 +4,15 @@
 use std::path::{Path, PathBuf};
 
 use crate::anim::{Clip, WrapMode};
+use crate::color::Rgba8;
 use crate::io::collada::{ColladaError, ColladaOptions, load_collada};
 use crate::io::obj::{ObjLoadError, ObjOptions, load_obj};
 use crate::io::{FsResolver, ResourceResolver};
-use crate::math::Vec3;
+use crate::math::{Aabb, Quat, Vec3};
 use crate::render::{AnimationRenderer, FrameSettings, RenderError};
-use crate::scene::{LocalTransform, Node, Scene};
+use crate::scene::{
+    LocalTransform, Material, MaterialId, Node, Scene, Submesh, Transform, primitives,
+};
 
 /// A supported model file format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -166,6 +169,63 @@ impl Model {
         self
     }
 
+    /// Adds a floor: a square of colour `color` just below the model's
+    /// lowest point over all its clips, centred under it, with a half
+    /// extent of `size` times the model's horizontal radius (non-finite or
+    /// non-positive sizes count as 1). Only clips present at this point
+    /// count, so add the floor after any turntable. It is scenery (see
+    /// [`Node::scenery`]): fixed while the model moves, ignored by camera
+    /// framing, and cheap to keep on screen.
+    #[must_use]
+    pub fn with_floor(mut self, color: Rgba8, size: f32) -> Self {
+        let size = if size.is_finite() && size > 0.0 {
+            size
+        } else {
+            1.0
+        };
+        let bounds = self
+            .clips
+            .iter()
+            .map(|c| crate::render::animated_bounds(&self.scene, Some(c)))
+            .fold(
+                crate::render::animated_bounds(&self.scene, None),
+                Aabb::union,
+            );
+        let bounds = if bounds.is_empty() {
+            Aabb::new(Vec3::splat(-0.5), Vec3::splat(0.5))
+        } else {
+            bounds
+        };
+        let extent = bounds.size();
+        let radius = (Vec3::new(extent.x, 0.0, extent.z).length() * 0.5).max(extent.y * 0.5);
+        // A small gap keeps the floor from z-fighting with the model's base.
+        let gap = (extent.y * 0.01).max(radius * 1e-3);
+        let center = bounds.center();
+        let material = MaterialId(self.scene.materials.len());
+        self.scene
+            .materials
+            .push(Material::with_color("floor", color.to_linear()));
+        let mesh = primitives::plane(1.0)
+            .with_submeshes(vec![Submesh {
+                material,
+                indices: 0..6,
+            }])
+            .expect("the plane has 6 indices");
+        let mesh = self.scene.add_mesh(mesh);
+        let transform = LocalTransform::Trs(Transform {
+            translation: Vec3::new(center.x, bounds.min.y - gap, center.z),
+            rotation: Quat::IDENTITY,
+            scale: Vec3::new(radius * size, 1.0, radius * size),
+        });
+        self.scene
+            .add_node(
+                None,
+                Node::new("floor", transform).with_mesh(mesh).as_scenery(),
+            )
+            .expect("a root node");
+        self
+    }
+
     /// A renderer for this model playing clip `clip` (if any) with `wrap`.
     ///
     /// # Errors
@@ -238,5 +298,68 @@ mod tests {
             "spinner"
         );
         assert_eq!(m.clips[1].channels[0].target.0, 0);
+    }
+
+    #[test]
+    fn floors_sit_under_the_model_stay_fixed_and_do_not_change_framing() {
+        use crate::color::Rgba8;
+        use crate::render::CameraSource;
+        let base = Model::from_source(Format::Obj, TRI, &MemResolver::new()).unwrap();
+        let green = Rgba8::new(0, 128, 0, 255);
+        for floor_first in [false, true] {
+            let model = if floor_first {
+                base.clone()
+                    .with_floor(green, 2.0)
+                    .with_turntable(Vec3::Y, 4.0)
+            } else {
+                base.clone()
+                    .with_turntable(Vec3::Y, 4.0)
+                    .with_floor(green, 2.0)
+            };
+            let floor = model
+                .scene
+                .nodes()
+                .iter()
+                .position(|n| n.name == "floor")
+                .unwrap();
+            assert!(model.scene.nodes()[floor].scenery);
+            assert_eq!(
+                model.scene.nodes()[floor].parent(),
+                None,
+                "not spun by the turntable"
+            );
+            let world = model.scene.world_matrices();
+            let mesh = model.scene.nodes()[floor].mesh.unwrap();
+            let b = model.scene.meshes()[mesh.0]
+                .bounds()
+                .transformed(&world[floor]);
+            // The triangle spans y in [0, 1]; spun about Y it covers a disc of
+            // radius 1 around the origin.
+            assert!(
+                b.max.y < 0.0 && b.max.y > -0.05,
+                "just below the model: {b:?}"
+            );
+            if floor_first {
+                // Sized from the rest pose: x in [0, 1], centred at 0.5.
+                assert!(b.min.x <= -0.5 && b.max.x >= 1.5, "{b:?}");
+            } else {
+                assert!(b.max.x >= 2.0 && b.max.z >= 2.0 && b.min.x <= -2.0, "{b:?}");
+            }
+            let mat = model.scene.meshes()[mesh.0].submeshes()[0].material;
+            assert_eq!(model.scene.materials[mat.0].base_color, green.to_linear());
+
+            // Framing (the camera's position) ignores the floor.
+            let camera = |m: &Model| {
+                let r = m
+                    .renderer(Some(0), WrapMode::Loop, FrameSettings::new(32, 32))
+                    .unwrap();
+                match r.settings().camera {
+                    CameraSource::Framed { .. } => r.framed_camera().unwrap().position(),
+                    _ => unreachable!(),
+                }
+            };
+            let without = base.clone().with_turntable(Vec3::Y, 4.0);
+            assert!(camera(&model).abs_diff_eq(camera(&without), 1e-5));
+        }
     }
 }

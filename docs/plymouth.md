@@ -59,8 +59,13 @@ ModelFile=/usr/share/plymouth/themes/3dboot-n64/n64_logo.dae
 TurntablePeriod=6
 # unlit | lambert | blinn-phong
 Shading=unlit
-# Background colour, RRGGBB.
-BackgroundColor=000000
+# Background colour, RRGGBB (sky blue in the demo theme).
+BackgroundColor=87CEEB
+# Floor colour, RRGGBB; leave out for no floor. The floor sits just below
+# the model, stays fixed while it moves, and costs little per frame.
+FloorColor=C8C8C8
+# Floor half size, in multiples of the model's horizontal radius (> 0).
+FloorSize=4
 # Frames per second (1–60).
 FramesPerSecond=30
 # Supersampling anti-aliasing, samples per axis (1 = off, up to 8; cost grows

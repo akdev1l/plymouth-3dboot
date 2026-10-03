@@ -8,7 +8,7 @@ use crate::math::{Aabb, Vec3, Viewport};
 use crate::pipeline::{RenderState, Renderer};
 use crate::raster::{CullMode, Rect};
 use crate::scene::{Camera, NodeId, Scene};
-use crate::shading::{DrawParams, Lighting, ShadeError, ShadingModel, draw_scene};
+use crate::shading::{DrawParams, Lighting, ShadeError, ShadingModel, draw_nodes};
 use crate::target::{ColorBuffer, Framebuffer, SizeError, downsample_rect};
 
 /// Where the camera comes from.
@@ -130,17 +130,17 @@ const FRAMING_SAMPLES: u16 = 64;
 /// Relative margin for motion between the samples.
 const FRAMING_MARGIN: f32 = 0.02;
 
-/// Bounds of `scene` over the whole of `clip` (or at rest): the union of
-/// the bounds of evenly sampled poses, grown by a small margin, so a framing
-/// camera keeps moving models in view.
-fn animated_bounds(scene: &Scene, clip: Option<&Clip>) -> Aabb {
+/// Bounds of the model in `scene` (not its scenery) over the whole of
+/// `clip` (or at rest): the union of the bounds of evenly sampled poses,
+/// grown by a small margin, so a framing camera keeps moving models in view.
+pub(crate) fn animated_bounds(scene: &Scene, clip: Option<&Clip>) -> Aabb {
     let Some(clip) = clip.filter(|c| c.duration() > 0.0) else {
-        return scene.bounds();
+        return scene.model_bounds_with(&scene.world_matrices());
     };
     let n = f32::from(FRAMING_SAMPLES);
     let bounds = (0..=FRAMING_SAMPLES)
         .map(|i| clip.start() + clip.duration() * f32::from(i) / n)
-        .map(|t| scene.bounds_with(&Pose::evaluate(scene, clip, t).world(scene)))
+        .map(|t| scene.model_bounds_with(&Pose::evaluate(scene, clip, t).world(scene)))
         .fold(Aabb::EMPTY, Aabb::union);
     if bounds.is_empty() {
         return bounds;
@@ -163,9 +163,14 @@ pub struct AnimationRenderer<'a> {
     target: Framebuffer,
     /// The downsampled image when anti-aliasing.
     resolved: Option<ColorBuffer>,
-    /// Target pixels the last frame may have drawn on; everything else is
-    /// background. `None` before the first frame (or after a failed one):
-    /// the whole target must be cleared.
+    /// Per node: fixed scenery, drawn as background. Scenery that the clip
+    /// animates, or seen through an animated camera node, moves and is
+    /// drawn like the model.
+    fixed: Vec<bool>,
+    /// Target pixels the moving geometry of the last frame may have drawn
+    /// on; everything else shows just the background and fixed scenery (in
+    /// colour and depth). `None` before the first frame (or after a failed
+    /// one): the whole target must be redrawn.
     drawn: Option<Rect>,
     /// Output pixels the last frame changed; see [`AnimationRenderer::damage`].
     damage: Rect,
@@ -209,18 +214,41 @@ impl<'a> AnimationRenderer<'a> {
         }
         #[allow(clippy::cast_precision_loss)]
         let aspect = settings.width.max(1) as f32 / settings.height.max(1) as f32;
+        // Framing shows the model; the near and far planes also enclose the
+        // scenery so that it is not cut off.
         let framed = match settings.camera {
-            CameraSource::Framed { direction, fov_y } => Some(Camera::framing(
-                animated_bounds(scene, clip.map(|(c, _)| c)),
-                direction,
-                Vec3::Y,
-                aspect,
-                fov_y,
-            )),
+            CameraSource::Framed { direction, fov_y } => Some(
+                Camera::framing(
+                    animated_bounds(scene, clip.map(|(c, _)| c)),
+                    direction,
+                    Vec3::Y,
+                    aspect,
+                    fov_y,
+                )
+                .enclosing(scene.bounds()),
+            ),
             _ => None,
         };
+        let animated: Vec<NodeId> = clip
+            .map(|(c, _)| c.channels.iter().map(|ch| ch.target).collect())
+            .unwrap_or_default();
+        let moves = |id: NodeId| {
+            let mut node = Some(id);
+            while let Some(n) = node {
+                if animated.contains(&n) {
+                    return true;
+                }
+                node = scene.nodes()[n.0].parent();
+            }
+            false
+        };
+        let fixed_camera = !matches!(settings.camera, CameraSource::Node(_));
+        let fixed = (0..scene.nodes().len())
+            .map(|i| fixed_camera && scene.is_scenery(NodeId(i)) && !moves(NodeId(i)))
+            .collect();
         let renderer = Renderer::with_threads(settings.threads);
         Ok(Self {
+            fixed,
             drawn: None,
             damage: Rect::default(),
             resolved,
@@ -249,6 +277,13 @@ impl<'a> AnimationRenderer<'a> {
         self.damage
     }
 
+    /// The camera computed for [`CameraSource::Framed`] (`None` for other
+    /// camera sources).
+    #[must_use]
+    pub fn framed_camera(&self) -> Option<Camera> {
+        self.framed
+    }
+
     /// The settings in use.
     #[must_use]
     pub fn settings(&self) -> &FrameSettings {
@@ -275,13 +310,14 @@ impl<'a> AnimationRenderer<'a> {
             CameraSource::Framed { .. } => self.framed.expect("computed in new"),
         };
         let s = &self.settings;
-        // Only what the previous frame drew differs from the background.
+        // Outside what the previous frame's moving geometry drew, the target
+        // still holds the background and fixed scenery: restore just that
+        // area (clear it, redraw the scenery within it), then draw the
+        // moving geometry, which depth-tests against the scenery everywhere.
         let full = Rect::from_size(self.target.width(), self.target.height());
         let previous = self.drawn.take();
-        match previous {
-            Some(rect) => self.target.clear_rect(rect, s.background),
-            None => self.target.clear(s.background),
-        }
+        let restore = previous.unwrap_or(full);
+        self.target.clear_rect(restore, s.background);
         let params = DrawParams {
             camera: &camera,
             lighting: &s.lighting,
@@ -290,13 +326,30 @@ impl<'a> AnimationRenderer<'a> {
         };
         let mut state = RenderState::new(Viewport::new(self.target.width(), self.target.height()));
         state.cull = s.cull;
-        let stats = draw_scene(
+        let fixed = &self.fixed;
+        if fixed.contains(&true) && !restore.is_empty() {
+            let scenery = RenderState {
+                scissor: Some(restore),
+                ..state
+            };
+            draw_nodes(
+                &mut self.renderer,
+                &mut self.target,
+                &scenery,
+                &params,
+                self.scene,
+                &world,
+                |id| fixed[id.0],
+            )?;
+        }
+        let stats = draw_nodes(
             &mut self.renderer,
             &mut self.target,
             &state,
             &params,
             self.scene,
             &world,
+            |id| !fixed[id.0],
         )?;
         self.drawn = Some(stats.bounds);
         let changed = previous.map_or(full, |rect| rect.union(&stats.bounds));
@@ -595,6 +648,56 @@ mod tests {
                 partial > 30,
                 "damage is usually smaller than the frame ({partial})"
             );
+        }
+    }
+
+    #[test]
+    fn fixed_scenery_is_drawn_once_and_restored_only_where_the_model_moved() {
+        let model = crate::Model {
+            scene: spinning_cube().0,
+            clips: vec![spinning_cube().1],
+            warnings: Vec::new(),
+        }
+        .with_floor(Rgba8::new(90, 140, 60, 255), 3.0);
+        let clip = (&model.clips[0], WrapMode::Loop);
+        for antialias in [1, 2, 3] {
+            let settings = || FrameSettings {
+                antialias,
+                background: Rgba8::new(135, 206, 235, 255),
+                ..FrameSettings::new(64, 40)
+            };
+            let mut incremental =
+                AnimationRenderer::new(&model.scene, Some(clip), settings()).unwrap();
+            assert_eq!(
+                incremental.fixed.iter().filter(|&&f| f).count(),
+                1,
+                "the floor is fixed"
+            );
+            let mut shown = ColorBuffer::new(64, 40, Rgba8::TRANSPARENT).unwrap();
+            for i in 0..40 {
+                let t = f64::from(i) * 0.29;
+                let image = incremental.render_at(t).unwrap().clone();
+                let damage = incremental.damage();
+                downsample_rect(&image, 1, &mut shown, damage);
+                let fresh = AnimationRenderer::new(&model.scene, Some(clip), settings())
+                    .unwrap()
+                    .render_at(t)
+                    .unwrap()
+                    .clone();
+                assert_eq!(shown, fresh, "frame {i}, antialias {antialias}");
+                if i == 0 {
+                    let floor_pixels = fresh.pixels().iter().filter(|p| p.b < 100).count();
+                    assert!(
+                        floor_pixels > 64 * 40 / 4,
+                        "the floor is visible ({floor_pixels})"
+                    );
+                } else {
+                    assert!(
+                        damage.area() < 64 * 40 / 2,
+                        "frame {i}: the floor is not redrawn ({damage:?})"
+                    );
+                }
+            }
         }
     }
 }

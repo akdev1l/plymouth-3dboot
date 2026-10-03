@@ -40,6 +40,25 @@ pub fn cube(half_extent: f32) -> Mesh {
         .expect("cube is valid")
 }
 
+/// A square in the XZ plane (y = 0) with the given half extent, facing +Y:
+/// 4 vertices and 2 triangles, counter-clockwise seen from above.
+#[must_use]
+pub fn plane(half_extent: f32) -> Mesh {
+    let corners = [(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)];
+    let positions = corners
+        .iter()
+        .map(|&(x, z)| Vec3::new(x, 0.0, z) * half_extent)
+        .collect();
+    let uvs = corners
+        .iter()
+        .map(|&(x, z)| Vec2::new((x + 1.0) * 0.5, (1.0 - z) * 0.5))
+        .collect();
+    Mesh::new(positions, vec![0, 1, 2, 0, 2, 3])
+        .and_then(|m| m.with_normals(vec![Vec3::Y; 4]))
+        .and_then(|m| m.with_uvs(uvs))
+        .expect("plane is valid")
+}
+
 /// A UV sphere with `segments` (≥ 3) divisions around the Y axis and
 /// `rings` (≥ 2) from pole to pole. Normals are radial.
 ///
@@ -170,5 +189,20 @@ mod tests {
             "{:?}",
             m.bounds()
         );
+    }
+
+    #[test]
+    fn plane_faces_up() {
+        let m = plane(2.0);
+        assert_eq!((m.positions().len(), m.triangle_count()), (4, 2));
+        assert_eq!(
+            m.bounds(),
+            Aabb::new(Vec3::new(-2.0, 0.0, -2.0), Vec3::new(2.0, 0.0, 2.0))
+        );
+        for [a, b, c] in m.triangles() {
+            let p = |i: u32| m.positions()[i as usize];
+            let n = (p(b) - p(a)).cross(p(c) - p(a));
+            assert!(n.y > 0.0, "counter-clockwise seen from above");
+        }
     }
 }

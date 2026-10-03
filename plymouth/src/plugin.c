@@ -64,7 +64,7 @@ struct _ply_boot_splash_plugin {
     char *message_text;     /* NULL when no message is shown */
 };
 
-/* Parses "RRGGBB" into options->background (opaque); false if invalid. */
+/* Parses "RRGGBB" into an opaque RGBA colour; false if invalid. */
 static bool parse_color(const char *text, uint8_t rgba[4]) {
     if (text == NULL || strlen(text) != 6)
         return false;
@@ -107,6 +107,18 @@ static ply_boot_splash_plugin_t *create_plugin(ply_key_file_t *key_file) {
     if (plugin->clip == SIZE_MAX && period > 0 &&
         p3b_model_add_turntable(model, 0, 1, 0, (float) period) == P3B_STATUS_OK)
         plugin->clip = 0;
+
+    /* After the turntable, so that the floor fits the spinning model. */
+    char *floor_color = ply_key_file_get_value(key_file, GROUP, "FloorColor");
+    if (floor_color != NULL) {
+        uint8_t rgba[4];
+        double size = ply_key_file_get_double(key_file, GROUP, "FloorSize", 4.0);
+        if (!parse_color(floor_color, rgba))
+            ply_trace("plymouth-3dboot: ignoring invalid FloorColor %s", floor_color);
+        else if (p3b_model_add_floor(model, rgba, size > 0 ? (float) size : 4.0f) != P3B_STATUS_OK)
+            ply_trace("plymouth-3dboot: floor: %s", p3b_last_error());
+        free(floor_color);
+    }
 
     char *shading = ply_key_file_get_value(key_file, GROUP, "Shading");
     if (shading != NULL) {
