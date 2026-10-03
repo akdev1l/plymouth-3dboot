@@ -12,7 +12,7 @@ after_includes = """
 
 // ABI version: the major version, incremented on every incompatible change
 // to the C API; the shared library is libplymouth_3dboot.so.<major>.
-#define P3B_ABI_VERSION 0 // x-release-please-major"""
+#define P3B_ABI_VERSION 1 // x-release-please-major"""
 
 [export]
 prefix = ""
