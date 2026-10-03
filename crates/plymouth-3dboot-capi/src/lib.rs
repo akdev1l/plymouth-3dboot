@@ -26,9 +26,15 @@ pub use render::*;
 
 use std::ffi::{CStr, c_char};
 
-/// ABI version: incremented on every incompatible change to the C API
-/// (matches the shared library's major version).
-pub const P3B_ABI_VERSION: u32 = 0;
+/// ABI version: the major version, incremented on every incompatible change
+/// to the C API; the shared library is `libplymouth_3dboot.so.<major>`.
+/// release-please updates the value (and the header's, which comes from
+/// cbindgen.toml) with the version.
+pub const P3B_ABI_VERSION: AbiVersion = 0; // x-release-please-major
+
+/// The type of [`P3B_ABI_VERSION`] (an alias without digits, so that
+/// release-please's major-version update finds the value).
+type AbiVersion = u32;
 
 /// The library version as a NUL-terminated string (e.g. `"0.1.0"`). The
 /// string is static: do not free it.
@@ -59,5 +65,10 @@ mod tests {
         let v = unsafe { CStr::from_ptr(p3b_version()) };
         assert_eq!(v.to_str().unwrap(), plymouth_3dboot::version());
         assert_eq!(p3b_abi_version(), P3B_ABI_VERSION);
+        assert_eq!(
+            P3B_ABI_VERSION.to_string(),
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            "the ABI follows the major version"
+        );
     }
 }

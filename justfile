@@ -5,6 +5,8 @@
 set positional-arguments
 
 wasm_target := "wasm32-unknown-emscripten"
+# Major version = ABI version: the C library's soname is libplymouth_3dboot.so.<abi>.
+abi := `sed -n 's/^version = "\([0-9]*\)\..*/\1/p' Cargo.toml | head -n1`
 # Size budget for the release web viewer's .wasm (docs/toolchain.md).
 web_wasm_budget := "4194304"
 # Test binaries need host filesystem access under node (see docs/toolchain.md).
@@ -111,7 +113,7 @@ plymouth-install: plymouth
 # libraries the harness unloads, for readable reports and suppressions).
 test-plymouth: plymouth
     # The build directory has no soname link (cargo cinstall creates it).
-    ln -sf libplymouth_3dboot.so target/capi/x86_64-unknown-linux-gnu/debug/libplymouth_3dboot.so.0
+    ln -sf libplymouth_3dboot.so target/capi/x86_64-unknown-linux-gnu/debug/libplymouth_3dboot.so.{{abi}}
     meson test -C target/plymouth --print-errorlogs \
         --wrapper "valgrind --quiet --keep-debuginfo=yes --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite,indirect --suppressions=$PWD/plymouth/tests/valgrind.supp"
 
@@ -121,7 +123,7 @@ budgets:
     cargo cbuild --locked --release -p plymouth-3dboot-capi --target-dir target/capi
     rm -rf target/tmp/budget && mkdir -p target/tmp/budget
     cp target/capi/x86_64-unknown-linux-gnu/release/libplymouth_3dboot.so target/tmp/budget/
-    ln -sf libplymouth_3dboot.so target/tmp/budget/libplymouth_3dboot.so.0
+    ln -sf libplymouth_3dboot.so target/tmp/budget/libplymouth_3dboot.so.{{abi}}
     cc -O2 -std=c11 crates/plymouth-3dboot-capi/examples/budget.c -I target/capi/x86_64-unknown-linux-gnu/release/include \
         -L target/tmp/budget -lplymouth_3dboot -Wl,-rpath,"$PWD/target/tmp/budget" -o target/tmp/budget/budget
     strip -o target/tmp/budget/stripped.so target/tmp/budget/libplymouth_3dboot.so
@@ -133,7 +135,8 @@ budgets:
 # Regenerate the committed C header after an intended API change.
 capi-header:
     cargo cbuild --locked -p plymouth-3dboot-capi --target-dir target/capi
-    cp target/capi/x86_64-unknown-linux-gnu/debug/include/plymouth-3dboot.h crates/plymouth-3dboot-capi/include/
+    # Without cargo-c's version macros, which follow Cargo.toml (see check-capi.sh).
+    grep -v '^#define PLYMOUTH_3DBOOT_\(MAJOR\|MINOR\|PATCH\) ' target/capi/x86_64-unknown-linux-gnu/debug/include/plymouth-3dboot.h > crates/plymouth-3dboot-capi/include/plymouth-3dboot.h
 
 # Build RPMs from the working tree into dist/rpm/ (Fedora container only:
 # DEV_CONTAINER=fedora scripts/dev.sh just rpm).

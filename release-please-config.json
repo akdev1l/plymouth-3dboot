@@ -25,6 +25,18 @@
         {
           "type": "generic",
           "path": "packaging/plymouth-3dboot.spec"
+        },
+        {
+          "type": "generic",
+          "path": "crates/plymouth-3dboot-capi/src/lib.rs"
+        },
+        {
+          "type": "generic",
+          "path": "crates/plymouth-3dboot-capi/cbindgen.toml"
+        },
+        {
+          "type": "generic",
+          "path": "crates/plymouth-3dboot-capi/include/plymouth-3dboot.h"
         }
       ]
     }

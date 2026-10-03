@@ -14,7 +14,8 @@ mkdir -p "${out}/lib"
 # The build directory has no soname link (cargo cinstall creates it):
 # stage the shared library under both names.
 cp "${lib}/libplymouth_3dboot.so" "${out}/lib/"
-ln -sf libplymouth_3dboot.so "${out}/lib/libplymouth_3dboot.so.0"
+major="$(sed -n 's/^version = "\([0-9]*\)\..*/\1/p' "${root}/Cargo.toml" | head -n1)"
+ln -sf libplymouth_3dboot.so "${out}/lib/libplymouth_3dboot.so.${major}"
 
 cflags=(-std=c11 -Wall -Wextra -Werror -pedantic -g -I "${lib}/include" -I "${src}")
 # Native libraries the static Rust library needs, from cargo-c's pkg-config file.

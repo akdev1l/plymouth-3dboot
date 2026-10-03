@@ -12,7 +12,7 @@ cargo cbuild -p plymouth-3dboot-capi --release          # into target/
 cargo cinstall -p plymouth-3dboot-capi --release --prefix /usr --destdir "$DESTDIR"
 ```
 
-This installs `libplymouth_3dboot.so.0` (plus the `.so` symlink and `.a`),
+This installs `libplymouth_3dboot.so.<major>` (plus the `.so` symlink and `.a`),
 `plymouth-3dboot.h` and `plymouth-3dboot.pc`. Link with
 `pkg-config --cflags --libs plymouth-3dboot`.
 

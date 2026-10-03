@@ -154,11 +154,11 @@ the model and the model's Readme.
 
 **Initramfs (dracut).** Plymouth's dracut module copies the selected theme's
 directory and plugin. dracut normally pulls in the plugin's library
-dependencies automatically. If `libplymouth_3dboot.so.0` is missing from
+dependencies automatically. If `libplymouth_3dboot.so.<major>` is missing from
 the initramfs (`lsinitrd | grep plymouth_3dboot`), add it explicitly:
 
 ```sh
-echo 'install_items+=" /usr/lib64/libplymouth_3dboot.so.0 "' > /etc/dracut.conf.d/plymouth-3dboot.conf
+echo 'install_items+=" /usr/lib64/libplymouth_3dboot.so.1 "' > /etc/dracut.conf.d/plymouth-3dboot.conf   # .so.<major>
 dracut -f
 ```
 

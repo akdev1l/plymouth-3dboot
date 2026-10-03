@@ -20,7 +20,8 @@ capi = []
 # cargo-c (`cargo cbuild` / `cargo cinstall`) builds the C library.
 [package.metadata.capi.library]
 name = "plymouth_3dboot"
-# Major ABI version (soname libplymouth_3dboot.so.0); bump on breaking changes.
+# The soname is libplymouth_3dboot.so.<major>: the major version is the ABI
+# version (P3B_ABI_VERSION).
 version_suffix_components = 1
 
 [package.metadata.capi.header]

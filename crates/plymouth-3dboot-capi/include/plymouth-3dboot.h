@@ -5,9 +5,6 @@
 #define PLYMOUTH_3DBOOT_H
 
 
-#define PLYMOUTH_3DBOOT_MAJOR 0
-#define PLYMOUTH_3DBOOT_MINOR 1
-#define PLYMOUTH_3DBOOT_PATCH 0
 
 
 #include <stdarg.h>
@@ -16,9 +13,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-// ABI version: incremented on every incompatible change to the C API
-// (matches the shared library's major version).
-#define P3B_ABI_VERSION 0
+// ABI version: the major version, incremented on every incompatible change
+// to the C API; the shared library is libplymouth_3dboot.so.<major>.
+#define P3B_ABI_VERSION 0 // x-release-please-major
 
 // Largest renderer width or height. Colour plus depth take 8 bytes per
 // pixel, so 8192 x 8192 needs 512 MiB; allocation failure would abort the

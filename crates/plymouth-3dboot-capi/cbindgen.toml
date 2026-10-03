@@ -6,10 +6,18 @@ cpp_compat = true
 documentation = true
 documentation_style = "c99"
 usize_is_size_t = true
+# The ABI version is written here rather than exported from the Rust
+# constant, so that release-please can update it in the header too.
+after_includes = """
+
+// ABI version: the major version, incremented on every incompatible change
+// to the C API; the shared library is libplymouth_3dboot.so.<major>.
+#define P3B_ABI_VERSION 0 // x-release-please-major"""
 
 [export]
 prefix = ""
 include = ["p3b_status"]
+exclude = ["P3B_ABI_VERSION"]
 
 [enum]
 # p3b_status variants become P3B_STATUS_OK, P3B_STATUS_NULL_POINTER, ...

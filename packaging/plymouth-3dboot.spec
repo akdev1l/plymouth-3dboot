@@ -118,13 +118,14 @@ cut -d'|' -f1 crates.txt > cargo-vendor.txt
 # The plugin's headless harness, against the library built above (the build
 # directory has no soname link; cinstall creates it on install).
 capi_dir="$(dirname target/capi/*/rpm/plymouth-3dboot.pc)"
-ln -sf libplymouth_3dboot.so "${capi_dir}/libplymouth_3dboot.so.0"
+# The soname carries the major version.
+ln -sf libplymouth_3dboot.so "${capi_dir}/libplymouth_3dboot.so.$(echo %{version} | cut -d. -f1)"
 %meson_test
 
 %files
 %license LICENSE LICENSE.dependencies cargo-vendor.txt
 %doc README.md
-%{_libdir}/libplymouth_3dboot.so.0{,.*}
+%{_libdir}/libplymouth_3dboot.so.*
 
 %files devel
 %doc docs/c-api.md

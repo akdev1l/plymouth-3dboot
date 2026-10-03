@@ -12,15 +12,21 @@ for f in libplymouth_3dboot.so libplymouth_3dboot.a plymouth-3dboot.pc include/p
 done
 
 soname="$(readelf -d "${dir}/libplymouth_3dboot.so" | sed -n 's/.*Library soname: \[\(.*\)\]/\1/p')"
-[[ "${soname}" == "libplymouth_3dboot.so.0" ]] || { echo "unexpected soname '${soname}'" >&2; exit 1; }
+# The soname carries the major version (the ABI version).
+major="$(sed -n 's/^version = "\([0-9]*\)\..*/\1/p' "$(dirname "${BASH_SOURCE[0]}")/../Cargo.toml" | head -n1)"
+[[ "${soname}" == "libplymouth_3dboot.so.${major}" ]] || { echo "unexpected soname '${soname}' (version major ${major})" >&2; exit 1; }
 
 exported="$(nm -D --defined-only "${dir}/libplymouth_3dboot.so" | awk '$2 ~ /^[TDBR]$/ {print $3}')"
 foreign="$(grep -v '^p3b_' <<<"${exported}" || true)"
 [[ -z "${foreign}" ]] || { echo "unexpected exported symbols:" >&2; echo "${foreign}" >&2; exit 1; }
 [[ -n "${exported}" ]] || { echo "no symbols exported" >&2; exit 1; }
 
+# cargo-c adds PLYMOUTH_3DBOOT_MAJOR/MINOR/PATCH from the crate version; the
+# committed reference header leaves them out so that it does not go stale
+# with every release (the installed header has them).
 committed="$(dirname "${BASH_SOURCE[0]}")/../crates/plymouth-3dboot-capi/include/plymouth-3dboot.h"
-if ! diff -u "${committed}" "${dir}/include/plymouth-3dboot.h" >&2; then
+generated="$(grep -v '^#define PLYMOUTH_3DBOOT_\(MAJOR\|MINOR\|PATCH\) ' "${dir}/include/plymouth-3dboot.h")"
+if ! diff -u "${committed}" <(printf '%s\n' "${generated}") >&2; then
     echo "the generated header differs from the committed one: review the ABI change and run 'just capi-header'" >&2
     exit 1
 fi
