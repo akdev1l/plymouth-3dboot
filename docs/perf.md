@@ -67,3 +67,36 @@ transfer function's `powf` dominated), and visiting only the covered span of
 each row. Threads (`FrameSettings::threads`, the `parallel` feature) split
 the frame into four bands per thread on a pool the renderer owns. A full
 1080p frame at 30 fps now uses about 15 % of one core.
+
+## Plymouth at 4K
+
+Measured 2026-10-02 at 3840×2160 (same machine), per frame of the N64
+spin model, with a small C program (not in the repository) timing the C API
+and Fedora 44's `libply-splash-core`:
+
+| | Before | After |
+|---|---|---|
+| Render, 1 / 2 threads | 33.5 / 25.9 ms | 9.1 / 5.8 ms |
+| Plymouth's `ply_pixel_buffer_fill_with_argb32_data` | 14.6 ms | 2.6 ms |
+| Frame timer | re-armed for 1/fps *after* each frame | fixed due times |
+
+Before, the plugin rendered and copied the whole screen every frame and
+then waited another 1/fps, which gave roughly 12 fps at 4K instead of 30.
+Three changes fixed it:
+
+- The renderer tracks damage: it clears only what the previous frame drew
+  and reports the changed rectangle (`AnimationRenderer::damage`,
+  `p3b_render_frame_incremental`). The plugin redraws just that rectangle,
+  so Plymouth's copy and its flush to the screen shrink with it (the N64
+  logo changes about 18% of the screen).
+- Frames are due every 1/fps from the start, independent of how long
+  drawing takes.
+- Unlit and flat shading produce runs of one colour; its sRGB encoding is
+  now computed once per run instead of per pixel.
+- The C API's conversion to Plymouth's premultiplied ARGB works on whole
+  `u32` words (opaque pixels only need red and blue swapped), which the
+  compiler vectorizes with SSE2; it now costs no more than a plain copy
+  (about 9 ms less per full 4K frame).
+
+The plugin logs the achieved frame rate and per-frame costs to Plymouth's
+debug log every 5 s (see [plymouth.md](plymouth.md#installing)).

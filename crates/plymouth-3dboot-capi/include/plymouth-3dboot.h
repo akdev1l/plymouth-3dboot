@@ -116,6 +116,18 @@ typedef struct p3b_render_options {
 // Layout of the pixels written by `p3b_render_frame` (`P3B_PIXEL_FORMAT_*`).
 typedef uint32_t p3b_pixel_format;
 
+// A rectangle of pixels: `width × height` pixels from column `x`, row `y`.
+typedef struct p3b_rect {
+  // First column.
+  uint32_t x;
+  // First row.
+  uint32_t y;
+  // Width in pixels (0 for an empty rectangle).
+  uint32_t width;
+  // Height in pixels (0 for an empty rectangle).
+  uint32_t height;
+} p3b_rect;
+
 // Bytes R, G, B, A (straight alpha).
 #define P3B_PIXEL_FORMAT_RGBA8888 0
 
@@ -298,6 +310,27 @@ enum p3b_status p3b_render_frame(struct p3b_renderer *renderer,
                                  size_t dst_len,
                                  size_t stride,
                                  p3b_pixel_format format);
+
+// Like `p3b_render_frame`, but writes only the pixels that changed since
+// this renderer's previous frame, and stores their bounding rectangle in
+// `*damage` (width and height 0 if nothing changed). Use it to update
+// only part of the screen.
+//
+// `dst` must hold the previous frame of this renderer, as written by
+// `p3b_render_frame` or `p3b_render_frame_incremental` with the same
+// `stride` and `format`. The renderer's first frame is written entirely.
+// On error, nothing is written to `dst` and `*damage` is the whole image.
+//
+// # Safety
+//
+// As for `p3b_render_frame`; `damage` must be a valid pointer.
+enum p3b_status p3b_render_frame_incremental(struct p3b_renderer *renderer,
+                                             double time,
+                                             uint8_t *dst,
+                                             size_t dst_len,
+                                             size_t stride,
+                                             p3b_pixel_format format,
+                                             struct p3b_rect *damage);
 
 #ifdef __cplusplus
 }  // extern "C"

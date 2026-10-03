@@ -6,10 +6,10 @@ use crate::anim::{Clip, Pose, WrapMode};
 use crate::color::Rgba8;
 use crate::math::{Aabb, Vec3, Viewport};
 use crate::pipeline::{RenderState, Renderer};
-use crate::raster::CullMode;
+use crate::raster::{CullMode, Rect};
 use crate::scene::{Camera, NodeId, Scene};
 use crate::shading::{DrawParams, Lighting, ShadeError, ShadingModel, draw_scene};
-use crate::target::{ColorBuffer, Framebuffer, SizeError};
+use crate::target::{ColorBuffer, Framebuffer, SizeError, downsample_rect};
 
 /// Where the camera comes from.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -163,6 +163,12 @@ pub struct AnimationRenderer<'a> {
     target: Framebuffer,
     /// The downsampled image when anti-aliasing.
     resolved: Option<ColorBuffer>,
+    /// Target pixels the last frame may have drawn on; everything else is
+    /// background. `None` before the first frame (or after a failed one):
+    /// the whole target must be cleared.
+    drawn: Option<Rect>,
+    /// Output pixels the last frame changed; see [`AnimationRenderer::damage`].
+    damage: Rect,
 }
 
 impl<'a> AnimationRenderer<'a> {
@@ -215,6 +221,8 @@ impl<'a> AnimationRenderer<'a> {
         };
         let renderer = Renderer::with_threads(settings.threads);
         Ok(Self {
+            drawn: None,
+            damage: Rect::default(),
             resolved,
             scene,
             clip,
@@ -223,6 +231,22 @@ impl<'a> AnimationRenderer<'a> {
             renderer,
             target,
         })
+    }
+
+    /// The last frame rendered by [`render_at`](Self::render_at) (the
+    /// background before the first).
+    #[must_use]
+    pub fn frame(&self) -> &ColorBuffer {
+        self.resolved.as_ref().unwrap_or(&self.target.color)
+    }
+
+    /// The output pixels that the last [`render_at`](Self::render_at)
+    /// changed: every pixel outside is identical to the frame before. The
+    /// first frame (and the one after a failed frame) is entirely damaged.
+    /// Presenting only this rectangle saves copying unchanged pixels.
+    #[must_use]
+    pub fn damage(&self) -> Rect {
+        self.damage
     }
 
     /// The settings in use.
@@ -251,7 +275,13 @@ impl<'a> AnimationRenderer<'a> {
             CameraSource::Framed { .. } => self.framed.expect("computed in new"),
         };
         let s = &self.settings;
-        self.target.clear(s.background);
+        // Only what the previous frame drew differs from the background.
+        let full = Rect::from_size(self.target.width(), self.target.height());
+        let previous = self.drawn.take();
+        match previous {
+            Some(rect) => self.target.clear_rect(rect, s.background),
+            None => self.target.clear(s.background),
+        }
         let params = DrawParams {
             camera: &camera,
             lighting: &s.lighting,
@@ -260,7 +290,7 @@ impl<'a> AnimationRenderer<'a> {
         };
         let mut state = RenderState::new(Viewport::new(self.target.width(), self.target.height()));
         state.cull = s.cull;
-        draw_scene(
+        let stats = draw_scene(
             &mut self.renderer,
             &mut self.target,
             &state,
@@ -268,9 +298,19 @@ impl<'a> AnimationRenderer<'a> {
             self.scene,
             &world,
         )?;
+        self.drawn = Some(stats.bounds);
+        let changed = previous.map_or(full, |rect| rect.union(&stats.bounds));
+        // In output pixels: every block that overlaps a changed target pixel.
+        let k = s.antialias;
+        self.damage = Rect {
+            x0: changed.x0 / k,
+            y0: changed.y0 / k,
+            x1: changed.x1.div_ceil(k),
+            y1: changed.y1.div_ceil(k),
+        };
         match &mut self.resolved {
             Some(out) => {
-                crate::target::downsample(&self.target.color, s.antialias, out);
+                downsample_rect(&self.target.color, k, out, self.damage);
                 Ok(out)
             }
             None => Ok(&self.target.color),
@@ -516,5 +556,45 @@ mod tests {
         let serial = frame(1);
         assert_eq!(frame(4), serial);
         assert_eq!(frame(0), serial, "0 means one thread");
+    }
+
+    #[test]
+    fn damage_covers_every_change_and_less_than_the_frame() {
+        let (scene, clip) = spinning_cube();
+        for antialias in [1, 2, 3] {
+            let settings = || FrameSettings {
+                antialias,
+                ..FrameSettings::new(61, 37)
+            };
+            let mut incremental =
+                AnimationRenderer::new(&scene, Some((&clip, WrapMode::Loop)), settings()).unwrap();
+            let mut shown = ColorBuffer::new(61, 37, Rgba8::new(1, 2, 3, 4)).unwrap();
+            let mut partial = 0;
+            for i in 0..40 {
+                let t = f64::from(i) * 0.37;
+                let image = incremental.render_at(t).unwrap().clone();
+                let damage = incremental.damage();
+                if i == 0 {
+                    assert_eq!(
+                        damage,
+                        Rect::from_size(61, 37),
+                        "the first frame is fully damaged"
+                    );
+                }
+                partial += usize::from(damage.area() < 61 * 37);
+                downsample_rect(&image, 1, &mut shown, damage);
+                let fresh =
+                    AnimationRenderer::new(&scene, Some((&clip, WrapMode::Loop)), settings())
+                        .unwrap()
+                        .render_at(t)
+                        .unwrap()
+                        .clone();
+                assert_eq!(shown, fresh, "frame {i}, antialias {antialias}");
+            }
+            assert!(
+                partial > 30,
+                "damage is usually smaller than the frame ({partial})"
+            );
+        }
     }
 }

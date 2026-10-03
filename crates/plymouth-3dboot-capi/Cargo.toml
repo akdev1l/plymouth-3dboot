@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 # Multi-threaded rendering is opt-in per renderer (threads option).
 plymouth-3dboot = { workspace = true, features = ["parallel"] }
+bytemuck.workspace = true
 
 [features]
 # Enabled by cargo-c when building the C library (convention).

@@ -417,6 +417,7 @@ dependencies = [
 name = "plymouth-3dboot-capi"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "plymouth-3dboot",
 ]
 

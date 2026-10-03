@@ -88,6 +88,9 @@ pub struct DrawStats {
     pub fragments_shaded: usize,
     /// Fragments written (shaded and not discarded).
     pub fragments_written: usize,
+    /// Pixels the draw may have written: the union of the rasterized
+    /// triangles' bounding boxes within the scissor (empty if none).
+    pub bounds: Rect,
 }
 
 impl std::ops::AddAssign for DrawStats {
@@ -98,6 +101,7 @@ impl std::ops::AddAssign for DrawStats {
         self.rasterized += o.rasterized;
         self.fragments_shaded += o.fragments_shaded;
         self.fragments_written += o.fragments_written;
+        self.bounds = self.bounds.union(&o.bounds);
     }
 }
 
@@ -182,6 +186,8 @@ fn rasterize_band<S: Shader>(
         y1: band.y1,
     });
     let (mut shaded, mut written) = (0, 0);
+    // Flat and unlit shading give runs of one colour: encode it once.
+    let mut last: Option<(LinearRgba, Rgba8)> = None;
     for tri in prepared {
         tri.setup.for_each_pixel(rect, |f| {
             let index = (f.y - band.y0) as usize * band.width + f.x as usize;
@@ -208,7 +214,14 @@ fn rasterize_band<S: Shader>(
             if state.depth.write {
                 *stored = depth;
             }
-            band.color[index] = color.to_srgb8();
+            band.color[index] = match last {
+                Some((linear, encoded)) if linear == color => encoded,
+                _ => {
+                    let encoded = color.to_srgb8();
+                    last = Some((color, encoded));
+                    encoded
+                }
+            };
             written += 1;
         });
     }
@@ -323,6 +336,7 @@ impl Renderer {
                     return;
                 }
                 stats.rasterized += 1;
+                stats.bounds = stats.bounds.union(&setup.bounds(scissor));
                 prepared.push(Prepared {
                     setup,
                     depths: screen.map(|v| v.position.z),
@@ -485,7 +499,8 @@ mod tests {
                 culled: 0,
                 rasterized: 2,
                 fragments_shaded: 48,
-                fragments_written: 48
+                fragments_written: 48,
+                bounds: Rect::from_size(8, 6),
             }
         );
     }

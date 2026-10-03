@@ -2,6 +2,11 @@
 /* Plymouth splash plugin rendering an animated 3D model with
  * libplymouth_3dboot. See docs/plymouth.md. */
 #define _GNU_SOURCE
+/* ply_trace compiles to nothing unless this is defined (Plymouth's own
+ * plugins get it from its build configuration); with it, messages appear in
+ * plymouthd's debug log. */
+#define PLY_ENABLE_TRACING 1
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -20,6 +25,8 @@
 #include <plymouth-3dboot.h>
 
 #define GROUP "plymouth-3dboot"
+/* Seconds between frame statistics in the debug log (plymouthd --debug). */
+#define STATS_INTERVAL 5.0
 #define EXPORT __attribute__((visibility("default")))
 
 /* One display (head) and its renderer. */
@@ -29,7 +36,7 @@ typedef struct view {
     p3b_renderer *renderer;
     uint32_t *pixels;       /* last rendered frame, width * height ARGB32 */
     unsigned long width, height;
-    double rendered_time;   /* animation time of `pixels`, or -1 */
+    bool has_frame;         /* `pixels` holds this renderer's last frame */
     ply_label_t *prompt;    /* prompt and entered text */
     ply_label_t *message;   /* display_message text */
 } view_t;
@@ -45,6 +52,13 @@ struct _ply_boot_splash_plugin {
 
     ply_event_loop_t *loop; /* set while the splash is shown */
     double start_time;      /* ply_get_timestamp() when shown */
+
+    /* Frame statistics since stats_start, logged every STATS_INTERVAL. */
+    double stats_start;
+    unsigned long stats_frames;
+    double stats_render;    /* seconds rendering */
+    double stats_present;   /* seconds in Plymouth (copy and flush) */
+    double stats_redrawn;   /* sum of the redrawn fractions of the screen */
 
     char *prompt_text;      /* NULL when no prompt is shown */
     char *message_text;     /* NULL when no message is shown */
@@ -140,7 +154,7 @@ static bool prepare_view(view_t *view) {
     free_view_resources(view);
     view->width = width;
     view->height = height;
-    view->rendered_time = -1;
+    view->has_frame = false;
     if (width == 0 || height == 0 || width > P3B_MAX_SIZE || height > P3B_MAX_SIZE)
         return false;
     view->pixels = malloc(width * height * sizeof *view->pixels);
@@ -181,23 +195,46 @@ static void update_labels(ply_boot_splash_plugin_t *plugin) {
     }
 }
 
+/* Renders the frame at time `t` into the view's buffer, writing only what
+ * changed since the view's previous frame. Returns the changed area (empty
+ * on failure). */
+static ply_rectangle_t render_view(view_t *view, double t) {
+    ply_rectangle_t area = {.x = 0, .y = 0, .width = 0, .height = 0};
+    size_t stride = view->width * sizeof *view->pixels;
+    size_t len = stride * view->height;
+    p3b_rect damage = {.x = 0, .y = 0, .width = (uint32_t) view->width, .height = (uint32_t) view->height};
+    p3b_status status =
+        view->has_frame
+            ? p3b_render_frame_incremental(view->renderer, t, (uint8_t *) view->pixels, len, stride,
+                                           P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED, &damage)
+            : p3b_render_frame(view->renderer, t, (uint8_t *) view->pixels, len, stride,
+                               P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED);
+    if (status != P3B_STATUS_OK) {
+        ply_trace("plymouth-3dboot: render: %s", p3b_last_error());
+        view->has_frame = false;
+        return area;
+    }
+    view->has_frame = true;
+    area.x = damage.x;
+    area.y = damage.y;
+    area.width = damage.width;
+    area.height = damage.height;
+    return area;
+}
+
+/* Plymouth asks for an area to be redrawn (clipping the buffer to it):
+ * show the last frame, rendering one first if there is none yet. Frames
+ * advance in on_timeout, which redraws only what changed. */
 static void on_draw(void *user_data, ply_pixel_buffer_t *pixel_buffer, int x, int y, int width, int height,
                     ply_pixel_display_t *display) {
     (void) display;
     view_t *view = user_data;
     if (!prepare_view(view))
         return;
-    /* Plymouth may draw several areas per frame: render once per time. */
-    double t = animation_time(view->plugin);
-    if (t != view->rendered_time) {
-        size_t stride = view->width * sizeof *view->pixels;
-        if (p3b_render_frame(view->renderer, t, (uint8_t *) view->pixels, stride * view->height, stride,
-                             P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED) != P3B_STATUS_OK) {
-            ply_trace("plymouth-3dboot: render: %s", p3b_last_error());
-            return;
-        }
-        view->rendered_time = t;
-    }
+    if (!view->has_frame)
+        render_view(view, animation_time(view->plugin));
+    if (!view->has_frame)
+        return;
     ply_rectangle_t area = {.x = 0, .y = 0, .width = view->width, .height = view->height};
     ply_pixel_buffer_fill_with_argb32_data(pixel_buffer, &area, view->pixels);
     ply_label_draw_area(view->prompt, pixel_buffer, x, y, (unsigned long) width, (unsigned long) height);
@@ -212,13 +249,67 @@ static void redraw_all(ply_boot_splash_plugin_t *plugin) {
     }
 }
 
+static void reset_stats(ply_boot_splash_plugin_t *plugin, double now) {
+    plugin->stats_start = now;
+    plugin->stats_frames = 0;
+    plugin->stats_render = 0;
+    plugin->stats_present = 0;
+    plugin->stats_redrawn = 0;
+}
+
+/* Accumulates one frame and logs the averages every STATS_INTERVAL. */
+static void record_stats(ply_boot_splash_plugin_t *plugin, double render, double present, double redrawn) {
+    plugin->stats_frames++;
+    plugin->stats_render += render;
+    plugin->stats_present += present;
+    plugin->stats_redrawn += redrawn;
+    double now = ply_get_timestamp();
+    double elapsed = now - plugin->stats_start;
+    if (elapsed < STATS_INTERVAL)
+        return;
+    double frames = (double) plugin->stats_frames;
+    ply_trace("plymouth-3dboot: %.1f fps; per frame: render %.1f ms, display %.1f ms, %.0f%% of the screen redrawn",
+              frames / elapsed, plugin->stats_render / frames * 1e3, plugin->stats_present / frames * 1e3,
+              plugin->stats_redrawn / frames * 100.0);
+    reset_stats(plugin, now);
+}
+
+static void on_timeout(void *user_data, ply_event_loop_t *loop);
+
+/* Arms the timer for the next frame. Frames are due every 1/fps from the
+ * start, so time spent drawing does not lower the frame rate; a late frame
+ * skips to the next due time instead of piling up. */
+static void schedule_frame(ply_boot_splash_plugin_t *plugin, ply_event_loop_t *loop) {
+    double period = 1.0 / plugin->fps;
+    double now = ply_get_timestamp();
+    double elapsed = now > plugin->start_time ? now - plugin->start_time : 0.0;
+    double next = plugin->start_time + ((double) (unsigned long) (elapsed / period) + 1.0) * period;
+    ply_event_loop_watch_for_timeout(loop, next - now, on_timeout, plugin);
+}
+
 static void on_timeout(void *user_data, ply_event_loop_t *loop) {
     ply_boot_splash_plugin_t *plugin = user_data;
     if (plugin->loop == NULL)
         return;
-    redraw_all(plugin);
-    /* Time-based animation: a late tick drops frames, it never slows down. */
-    ply_event_loop_watch_for_timeout(loop, 1.0 / plugin->fps, on_timeout, plugin);
+    double t = animation_time(plugin);
+    double render = 0, present = 0, redrawn = 0;
+    for (size_t i = 0; i < plugin->view_count; i++) {
+        view_t *view = plugin->views[i];
+        if (!prepare_view(view))
+            continue;
+        double started = ply_get_timestamp();
+        ply_rectangle_t changed = render_view(view, t);
+        double rendered = ply_get_timestamp();
+        if (changed.width > 0 && changed.height > 0)
+            ply_pixel_display_draw_area(view->display, (int) changed.x, (int) changed.y, (int) changed.width,
+                                        (int) changed.height);
+        present += ply_get_timestamp() - rendered;
+        render += rendered - started;
+        redrawn += (double) (changed.width * changed.height) / (double) (view->width * view->height);
+    }
+    if (plugin->view_count > 0)
+        record_stats(plugin, render, present, redrawn / (double) plugin->view_count);
+    schedule_frame(plugin, loop);
 }
 
 static void add_pixel_display(ply_boot_splash_plugin_t *plugin, ply_pixel_display_t *display) {
@@ -233,7 +324,6 @@ static void add_pixel_display(ply_boot_splash_plugin_t *plugin, ply_pixel_displa
     plugin->views = views;
     view->plugin = plugin;
     view->display = display;
-    view->rendered_time = -1;
     view->prompt = ply_label_new();
     view->message = ply_label_new();
     plugin->views[plugin->view_count++] = view;
@@ -283,8 +373,11 @@ static bool show_splash_screen(ply_boot_splash_plugin_t *plugin, ply_event_loop_
     stop_animation(plugin);
     plugin->loop = loop;
     plugin->start_time = ply_get_timestamp();
+    reset_stats(plugin, plugin->start_time);
+    for (size_t i = 0; i < plugin->view_count; i++)
+        plugin->views[i]->has_frame = false; /* render the first frame afresh */
     redraw_all(plugin);
-    ply_event_loop_watch_for_timeout(loop, 1.0 / plugin->fps, on_timeout, plugin);
+    schedule_frame(plugin, loop);
     return true;
 }
 
@@ -348,6 +441,13 @@ static void hide_message(ply_boot_splash_plugin_t *plugin, const char *message) 
         set_text(plugin, &plugin->message_text, NULL);
 }
 
+/* Boot status updates (systemd sends one per unit) are not shown. Plymouth
+ * asserts that this callback exists, so it must not be NULL. */
+static void update_status(ply_boot_splash_plugin_t *plugin, const char *status) {
+    (void) plugin;
+    (void) status;
+}
+
 static void become_idle(ply_boot_splash_plugin_t *plugin, ply_trigger_t *idle_trigger) {
     (void) plugin;
     ply_trigger_pull(idle_trigger, NULL);
@@ -361,6 +461,7 @@ EXPORT ply_boot_splash_plugin_interface_t *ply_boot_splash_plugin_get_interface(
         .remove_pixel_display = remove_pixel_display,
         .show_splash_screen = show_splash_screen,
         .hide_splash_screen = hide_splash_screen,
+        .update_status = update_status,
         .become_idle = become_idle,
         .display_normal = display_normal,
         .display_password = display_password,

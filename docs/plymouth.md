@@ -19,14 +19,15 @@ callbacks:
 |---|---|
 | `create_plugin(key_file)` | Read the theme keys (below) and load the model. Return NULL on failure; plymouthd then falls back to another splash. |
 | `add_pixel_display` / `remove_pixel_display` | Keep one *view* per display (head): a `p3b_renderer` sized to the display and an ARGB32 frame buffer. Register a draw handler with `ply_pixel_display_set_draw_handler`. |
-| `show_splash_screen(loop, boot_buffer, mode)` | Record the start time (`ply_get_timestamp()`) and start the frame timer `ply_event_loop_watch_for_timeout(loop, 1/fps, …)`. |
-| frame timer | Ask every display to redraw (`ply_pixel_display_draw_area`), then re-arm. Animation time is `now - start`, so slow frames drop rather than slowing the animation down. |
-| draw handler `(user, pixel_buffer, x, y, w, h, display)` | Render the frame for the current time with `p3b_render_frame(…, P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED)` into the view buffer, then `ply_pixel_buffer_fill_with_argb32_data`. Plymouth clips to the update area. Draw prompt or message labels on top. |
+| `show_splash_screen(loop, boot_buffer, mode)` | Record the start time (`ply_get_timestamp()`), redraw every display, and start the frame timer (`ply_event_loop_watch_for_timeout`). |
+| frame timer | For each display, render the frame for the current time into the view buffer with `p3b_render_frame_incremental(…, P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED, &damage)` and redraw only `damage` (`ply_pixel_display_draw_area`). Re-arm for the next due time: frames are due every 1/fps from the start, so the time spent drawing does not lower the frame rate, and a late frame skips to the next due time. Animation time is `now - start`, so slow frames drop rather than slowing the animation down. |
+| draw handler `(user, pixel_buffer, x, y, w, h, display)` | Copy the view buffer with `ply_pixel_buffer_fill_with_argb32_data` (rendering a first frame if there is none). Plymouth clips the copy, and its flush to the screen, to the requested area. Draw prompt or message labels on top. |
 | `hide_splash_screen` | Stop the timer and unset the draw handlers. |
 | `display_message` / `hide_message` | Show or hide a line of text (`ply_label`). |
 | `display_password(prompt, bullets)` / `display_question(prompt, text)` / `display_prompt` | Show the prompt and the entered text (bullets for secrets) with `ply_label`s; `display_normal` hides them. |
 | `become_idle(trigger)` | Pull the trigger: there is nothing to finish. |
-| keyboard, text display, progress, boot output | Ignored (optional callbacks may be NULL). |
+| `update_status(status)` | Ignored. systemd sends one per unit during boot. **Required:** plymouthd asserts it is not NULL (as for `show_splash_screen` and `hide_splash_screen`), and the harness checks all three. |
+| keyboard, text display, progress, boot output | Ignored (these optional callbacks may be NULL). |
 
 All boot modes (boot, shutdown, reboot, updates) show the same animation.
 Prompt and message text is drawn with `ply_label`, which needs a Plymouth
@@ -158,9 +159,18 @@ dracut -f
 
 **Debugging.** Run `plymouthd --debug --debug-file=/tmp/plymouth.log` (or
 boot with `plymouth.debug`); the plugin logs through `ply_trace`, for
-example when the model cannot be loaded. To try a theme without rebooting,
-run `plymouthd; plymouth show-splash; sleep 10; plymouth quit` as root on a
-spare VT.
+example when the model cannot be loaded. Every 5 s it also logs its frame
+statistics: the frame rate achieved, the time per frame spent rendering and
+in Plymouth (copying and flushing to the screen), and the share of the screen
+redrawn:
+
+```
+plymouth-3dboot: 30.0 fps; per frame: render 9.8 ms, display 3.1 ms, 18% of the screen redrawn
+```
+
+To try a theme without rebooting, run
+`plymouthd --debug --debug-file=/tmp/plymouth.log; plymouth show-splash; sleep 20; plymouth quit`
+as root on a spare VT, then `grep plymouth-3dboot /tmp/plymouth.log`.
 
 ## Testing
 

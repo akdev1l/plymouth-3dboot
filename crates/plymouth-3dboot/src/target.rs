@@ -6,6 +6,7 @@
 //! pixel buffers) copy rows out of [`ColorBuffer::as_bytes`].
 
 use crate::color::Rgba8;
+use crate::raster::Rect;
 
 /// Largest supported width or height, in pixels.
 ///
@@ -39,6 +40,23 @@ struct Grid<T> {
 }
 
 impl<T: Copy> Grid<T> {
+    /// Sets the values within `rect` (clipped to the grid) to `value`.
+    fn fill_rect(&mut self, rect: Rect, value: T) {
+        let r = rect.intersect(&Rect::from_size(self.width, self.height));
+        if r.is_empty() {
+            return;
+        }
+        let w = self.width as usize;
+        for row in self
+            .data
+            .chunks_exact_mut(w)
+            .take(r.y1 as usize)
+            .skip(r.y0 as usize)
+        {
+            row[r.x0 as usize..r.x1 as usize].fill(value);
+        }
+    }
+
     fn new(width: u32, height: u32, value: T) -> Result<Self, SizeError> {
         let len = check_size(width, height)?;
         Ok(Self {
@@ -98,6 +116,11 @@ impl ColorBuffer {
     /// Sets every pixel to `color`.
     pub fn clear(&mut self, color: Rgba8) {
         self.0.data.fill(color);
+    }
+
+    /// Sets the pixels within `rect` (clipped to the buffer) to `color`.
+    pub fn clear_rect(&mut self, rect: Rect, color: Rgba8) {
+        self.0.fill_rect(rect, color);
     }
 
     /// The pixel at `(x, y)`, or `None` if out of bounds.
@@ -170,6 +193,11 @@ impl DepthBuffer {
         self.0.data.fill(depth);
     }
 
+    /// Sets the values within `rect` (clipped to the buffer) to `depth`.
+    pub fn clear_rect(&mut self, rect: Rect, depth: f32) {
+        self.0.fill_rect(rect, depth);
+    }
+
     /// The depth at `(x, y)`, or `None` if out of bounds.
     #[must_use]
     pub fn get(&self, x: u32, y: u32) -> Option<f32> {
@@ -233,6 +261,12 @@ impl Framebuffer {
         self.color.clear(color);
         self.depth.clear(DepthBuffer::FAR);
     }
+
+    /// Clears colour and depth within `rect` (clipped to the buffer).
+    pub fn clear_rect(&mut self, rect: Rect, color: Rgba8) {
+        self.color.clear_rect(rect, color);
+        self.depth.clear_rect(rect, DepthBuffer::FAR);
+    }
 }
 
 /// Downsamples `src` by `factor` in each direction into `dst` (which must be
@@ -244,23 +278,48 @@ impl Framebuffer {
 ///
 /// Panics if the sizes do not match.
 pub fn downsample(src: &ColorBuffer, factor: u32, dst: &mut ColorBuffer) {
+    let all = Rect::from_size(dst.width(), dst.height());
+    downsample_rect(src, factor, dst, all);
+}
+
+/// Like [`downsample`], but only writes the `dst` pixels within `rect`
+/// (clipped to `dst`).
+///
+/// # Panics
+///
+/// Panics if the sizes do not match.
+pub fn downsample_rect(src: &ColorBuffer, factor: u32, dst: &mut ColorBuffer, rect: Rect) {
     assert!(factor >= 1, "factor must be at least 1");
     assert_eq!(
         (src.width(), src.height()),
         (dst.width() * factor, dst.height() * factor),
         "size mismatch"
     );
+    let r = rect.intersect(&Rect::from_size(dst.width(), dst.height()));
+    if r.is_empty() {
+        return;
+    }
+    let (x0, x1) = (r.x0 as usize, r.x1 as usize);
+    let dw = dst.width() as usize;
     if factor == 1 {
-        dst.pixels_mut().copy_from_slice(src.pixels());
+        for y in r.y0 as usize..r.y1 as usize {
+            dst.pixels_mut()[y * dw + x0..y * dw + x1]
+                .copy_from_slice(&src.pixels()[y * dw + x0..y * dw + x1]);
+        }
         return;
     }
     let decode = crate::color::srgb8_decode_table();
     let (f, sw) = (factor as usize, src.width() as usize);
     #[allow(clippy::cast_precision_loss)]
     let inv = 1.0 / (f * f) as f32;
-    let dw = dst.width() as usize;
-    for (dy, row) in dst.pixels_mut().chunks_exact_mut(dw.max(1)).enumerate() {
-        for (dx, out) in row.iter_mut().enumerate() {
+    for (dy, row) in dst
+        .pixels_mut()
+        .chunks_exact_mut(dw)
+        .enumerate()
+        .take(r.y1 as usize)
+        .skip(r.y0 as usize)
+    {
+        for (dx, out) in row.iter_mut().enumerate().take(x1).skip(x0) {
             let mut sum = [0.0f32; 4];
             for sy in dy * f..(dy + 1) * f {
                 for p in &src.pixels()[sy * sw + dx * f..][..f] {
@@ -379,5 +438,63 @@ mod tests {
         assert!(DepthBuffer::new(1, u32::MAX).is_err());
         assert!(Framebuffer::new(MAX_DIMENSION, MAX_DIMENSION + 1, RED).is_err());
         assert!(err.to_string().contains("16384"));
+    }
+
+    #[test]
+    fn rect_clears_and_downsampling_touch_only_the_rectangle() {
+        let blue = Rgba8::new(0, 0, 255, 255);
+        let mut fb = Framebuffer::new(6, 4, RED).unwrap();
+        fb.depth.clear(0.5);
+        fb.clear_rect(
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 9,
+            },
+            blue,
+        );
+        for y in 0..4 {
+            for x in 0..6 {
+                let inside = (1..3).contains(&x) && y >= 1;
+                assert_eq!(
+                    fb.color.get(x, y),
+                    Some(if inside { blue } else { RED }),
+                    "({x}, {y})"
+                );
+                assert_eq!(
+                    fb.depth.get(x, y),
+                    Some(if inside { DepthBuffer::FAR } else { 0.5 })
+                );
+            }
+        }
+        // A partial resolve equals the full one inside, keeps the rest.
+        let mut full = ColorBuffer::new(3, 2, Rgba8::BLACK).unwrap();
+        downsample(&fb.color, 2, &mut full);
+        for factor_one in [false, true] {
+            let (src, f) = if factor_one {
+                (&full, 1)
+            } else {
+                (&fb.color, 2)
+            };
+            let mut part = ColorBuffer::new(3, 2, Rgba8::BLACK).unwrap();
+            let rect = Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 2,
+            };
+            downsample_rect(src, f, &mut part, rect);
+            for y in 0..2 {
+                for x in 0..3 {
+                    let want = if x == 1 {
+                        full.get(x, y)
+                    } else {
+                        Some(Rgba8::BLACK)
+                    };
+                    assert_eq!(part.get(x, y), want, "({x}, {y}) factor {f}");
+                }
+            }
+        }
     }
 }

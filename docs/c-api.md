@@ -84,6 +84,14 @@ A complete program is in
   `P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED`, each pixel is a native-endian
   `uint32_t` `0xAARRGGBB` with premultiplied colour, which is Plymouth's
   `ply_pixel_buffer` format.
+- **Partial updates.** `p3b_render_frame_incremental` takes the same
+  arguments plus a `p3b_rect *damage`. It writes only the pixels that changed
+  since the renderer's previous frame and returns their bounding rectangle,
+  which is usually a small part of the screen because the background does
+  not move. `dst` must hold that previous frame, written by either function
+  with the same `stride` and `format`; the first frame is written entirely.
+  Present just the `damage` rectangle (for Plymouth,
+  `ply_pixel_display_draw_area`) to save copying unchanged pixels.
 
 ## Versioning
 

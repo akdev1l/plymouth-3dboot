@@ -3,7 +3,7 @@
 
 use plymouth_3dboot::color::Rgba8;
 use plymouth_3dboot::math::Vec3;
-use plymouth_3dboot::raster::CullMode;
+use plymouth_3dboot::raster::{CullMode, Rect};
 use plymouth_3dboot::scene::{Camera, Projection};
 use plymouth_3dboot::shading::ShadingModel;
 use plymouth_3dboot::target::ColorBuffer;
@@ -306,24 +306,163 @@ pub unsafe extern "C" fn p3b_renderer_free(renderer: *mut p3b_renderer) {
     }
 }
 
-/// Writes `image` into `dst` (rows `stride` bytes apart) in `format`; bytes
-/// past each row's pixels are not touched.
-fn write_pixels(image: &ColorBuffer, dst: &mut [u8], stride: usize, format: PixelFormat) {
-    let w = image.width() as usize;
-    for (y, row) in image.pixels().chunks_exact(w.max(1)).enumerate() {
-        let out = &mut dst[y * stride..][..w * 4];
-        for (px, o) in row.iter().zip(out.as_chunks_mut::<4>().0) {
-            *o = match format {
-                PixelFormat::Rgba => px.to_array(),
-                PixelFormat::Bgra => [px.b, px.g, px.r, px.a],
-                PixelFormat::Argb32Premultiplied => {
-                    let pm = |c: u8| u32::from((u16::from(c) * u16::from(px.a) + 127) / 255);
-                    (u32::from(px.a) << 24 | pm(px.r) << 16 | pm(px.g) << 8 | pm(px.b))
-                        .to_ne_bytes()
-                }
-            };
+/// A rectangle of pixels: `width × height` pixels from column `x`, row `y`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct p3b_rect {
+    /// First column.
+    pub x: u32,
+    /// First row.
+    pub y: u32,
+    /// Width in pixels (0 for an empty rectangle).
+    pub width: u32,
+    /// Height in pixels (0 for an empty rectangle).
+    pub height: u32,
+}
+
+impl From<Rect> for p3b_rect {
+    fn from(r: Rect) -> Self {
+        if r.is_empty() {
+            return Self::default();
+        }
+        Self {
+            x: r.x0,
+            y: r.y0,
+            width: r.x1 - r.x0,
+            height: r.y1 - r.y0,
         }
     }
+}
+
+/// Writes the pixels of `image` within `rect` into `dst` (rows `stride`
+/// bytes apart) in `format`; nothing else in `dst` is touched.
+fn write_pixels(
+    image: &ColorBuffer,
+    rect: Rect,
+    dst: &mut [u8],
+    stride: usize,
+    format: PixelFormat,
+) {
+    let r = rect.intersect(&Rect::from_size(image.width(), image.height()));
+    if r.is_empty() {
+        return;
+    }
+    let w = image.width() as usize;
+    let (x0, x1) = (r.x0 as usize, r.x1 as usize);
+    for y in r.y0 as usize..r.y1 as usize {
+        let row = &image.pixels()[y * w + x0..y * w + x1];
+        convert_row(
+            row,
+            &mut dst[y * stride + x0 * 4..y * stride + x1 * 4],
+            format,
+        );
+    }
+}
+
+/// Converts one row of pixels into `out` (4 bytes per pixel). The loops are
+/// branch-free over `u32` words, so the compiler vectorizes them (SSE2 on
+/// x86-64, simd128 on wasm when enabled) without unsafe code.
+fn convert_row(row: &[Rgba8], out: &mut [u8], format: PixelFormat) {
+    let src: &[u8] = bytemuck::cast_slice(row);
+    if format == PixelFormat::Rgba {
+        out.copy_from_slice(src);
+        return;
+    }
+    let src = src.as_chunks::<4>().0;
+    let out = out.as_chunks_mut::<4>().0;
+    // An RGBA pixel read as a little-endian word is 0xAABBGGRR; swapping the
+    // red and blue bytes gives 0xAARRGGBB.
+    let swap_red_blue = |w: u32| (w & 0xFF00_FF00) | (w & 0xFF) << 16 | (w >> 16) & 0xFF;
+    match format {
+        PixelFormat::Bgra => {
+            for (px, o) in src.iter().zip(out) {
+                *o = swap_red_blue(u32::from_le_bytes(*px)).to_le_bytes();
+            }
+        }
+        PixelFormat::Argb32Premultiplied => {
+            // Premultiplying leaves opaque pixels unchanged ((c * 255 + 127)
+            // / 255 == c): reorder in one pass while checking for
+            // transparency, and redo the row only if there is any.
+            let mut alpha = 0xFF;
+            for (px, o) in src.iter().zip(out.iter_mut()) {
+                alpha &= px[3];
+                *o = swap_red_blue(u32::from_le_bytes(*px)).to_ne_bytes();
+            }
+            if alpha != 0xFF {
+                for (px, o) in row.iter().zip(out) {
+                    let pm = |c: u8| u32::from((u16::from(c) * u16::from(px.a) + 127) / 255);
+                    *o = (u32::from(px.a) << 24 | pm(px.r) << 16 | pm(px.g) << 8 | pm(px.b))
+                        .to_ne_bytes();
+                }
+            }
+        }
+        PixelFormat::Rgba => unreachable!("copied above"),
+    }
+}
+
+/// Shared implementation of the frame functions: validates the arguments,
+/// renders, and writes the whole image (`incremental` false) or only its
+/// damage. Returns the rectangle written.
+///
+/// # Safety
+///
+/// As for `p3b_render_frame`.
+unsafe fn render_into(
+    renderer: *mut p3b_renderer,
+    time: f64,
+    dst: *mut u8,
+    dst_len: usize,
+    stride: usize,
+    format: p3b_pixel_format,
+    incremental: bool,
+) -> Result<Rect, (p3b_status, String)> {
+    // SAFETY: NULL-checked; otherwise live and exclusively used (contract).
+    let r = unsafe { renderer.as_mut() }
+        .ok_or_else(|| (p3b_status::NullPointer, "renderer is NULL".into()))?;
+    let format = pixel_format(format)?;
+    if dst.is_null() {
+        return Err((p3b_status::NullPointer, "dst is NULL".into()));
+    }
+    let (w, h) = (
+        r.inner.settings().width as usize,
+        r.inner.settings().height as usize,
+    );
+    if stride < w * 4 {
+        return Err((
+            p3b_status::InvalidArgument,
+            format!("stride {stride} is less than width * 4 = {}", w * 4),
+        ));
+    }
+    let Some(needed) = stride.checked_mul(h - 1).and_then(|n| n.checked_add(w * 4)) else {
+        return Err((
+            p3b_status::InvalidArgument,
+            "stride * height overflows".into(),
+        ));
+    };
+    if dst_len < needed {
+        return Err((
+            p3b_status::BufferTooSmall,
+            format!("buffer holds {dst_len} bytes, {needed} needed"),
+        ));
+    }
+    if !time.is_finite() {
+        return Err((p3b_status::InvalidArgument, "time must be finite".into()));
+    }
+    r.inner
+        .render_at(time)
+        .map_err(|e| (p3b_status::Render, e.to_string()))?;
+    let image = r.inner.frame();
+    let rect = if incremental {
+        r.inner.damage()
+    } else {
+        Rect::from_size(image.width(), image.height())
+    };
+    // SAFETY: `dst` points to `dst_len >= needed` writable bytes
+    // (contract). The slice covers only the bytes we write, a real
+    // allocation size unlike a caller's possibly oversized `dst_len`.
+    let dst = unsafe { std::slice::from_raw_parts_mut(dst, needed) };
+    write_pixels(image, rect, dst, stride, format);
+    Ok(rect)
 }
 
 /// Renders the frame at playback time `time` (seconds) into `dst`, which
@@ -345,48 +484,48 @@ pub unsafe extern "C" fn p3b_render_frame(
     format: p3b_pixel_format,
 ) -> p3b_status {
     ffi_guard(|| {
-        // SAFETY: NULL-checked; otherwise live and exclusively used (contract).
-        let r = unsafe { renderer.as_mut() }
-            .ok_or_else(|| (p3b_status::NullPointer, "renderer is NULL".into()))?;
-        let format = pixel_format(format)?;
-        if dst.is_null() {
-            return Err((p3b_status::NullPointer, "dst is NULL".into()));
-        }
-        let (w, h) = (
-            r.inner.settings().width as usize,
-            r.inner.settings().height as usize,
-        );
-        if stride < w * 4 {
-            return Err((
-                p3b_status::InvalidArgument,
-                format!("stride {stride} is less than width * 4 = {}", w * 4),
-            ));
-        }
-        let Some(needed) = stride.checked_mul(h - 1).and_then(|n| n.checked_add(w * 4)) else {
-            return Err((
-                p3b_status::InvalidArgument,
-                "stride * height overflows".into(),
-            ));
-        };
-        if dst_len < needed {
-            return Err((
-                p3b_status::BufferTooSmall,
-                format!("buffer holds {dst_len} bytes, {needed} needed"),
-            ));
-        }
-        if !time.is_finite() {
-            return Err((p3b_status::InvalidArgument, "time must be finite".into()));
-        }
-        let image = r
-            .inner
-            .render_at(time)
-            .map_err(|e| (p3b_status::Render, e.to_string()))?;
-        // SAFETY: `dst` points to `dst_len >= needed` writable bytes
-        // (contract). The slice covers only the bytes we write, a real
-        // allocation size unlike a caller's possibly oversized `dst_len`.
-        let dst = unsafe { std::slice::from_raw_parts_mut(dst, needed) };
-        write_pixels(image, dst, stride, format);
-        Ok(())
+        // SAFETY: the caller's contract is that of render_into.
+        unsafe { render_into(renderer, time, dst, dst_len, stride, format, false) }.map(|_| ())
+    })
+}
+
+/// Like `p3b_render_frame`, but writes only the pixels that changed since
+/// this renderer's previous frame, and stores their bounding rectangle in
+/// `*damage` (width and height 0 if nothing changed). Use it to update
+/// only part of the screen.
+///
+/// `dst` must hold the previous frame of this renderer, as written by
+/// `p3b_render_frame` or `p3b_render_frame_incremental` with the same
+/// `stride` and `format`. The renderer's first frame is written entirely.
+/// On error, nothing is written to `dst` and `*damage` is the whole image.
+///
+/// # Safety
+///
+/// As for `p3b_render_frame`; `damage` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn p3b_render_frame_incremental(
+    renderer: *mut p3b_renderer,
+    time: f64,
+    dst: *mut u8,
+    dst_len: usize,
+    stride: usize,
+    format: p3b_pixel_format,
+    damage: *mut p3b_rect,
+) -> p3b_status {
+    if damage.is_null() {
+        return ffi_guard(|| Err((p3b_status::NullPointer, "damage is NULL".into())));
+    }
+    ffi_guard(|| {
+        // SAFETY: forwarded contract.
+        let result = unsafe { render_into(renderer, time, dst, dst_len, stride, format, true) };
+        // SAFETY: NULL-checked; otherwise live (contract). A failed frame
+        // reports full damage, so callers redraw everything.
+        let full = unsafe { renderer.as_ref() }
+            .map(|r| Rect::from_size(r.inner.settings().width, r.inner.settings().height))
+            .unwrap_or_default();
+        // SAFETY: `damage` is non-NULL and writable (contract).
+        unsafe { damage.write(result.as_ref().map_or(full, |r| *r).into()) };
+        result.map(|_| ())
     })
 }
 
@@ -415,15 +554,60 @@ mod tests {
         *img.get_mut(0, 0).unwrap() = Rgba8::new(10, 20, 30, 255);
         *img.get_mut(1, 0).unwrap() = Rgba8::new(200, 100, 50, 128);
         let mut out = [0u8; 8];
-        write_pixels(&img, &mut out, 8, PixelFormat::Rgba);
+        write_pixels(&img, Rect::from_size(2, 1), &mut out, 8, PixelFormat::Rgba);
         assert_eq!(out, [10, 20, 30, 255, 200, 100, 50, 128]);
-        write_pixels(&img, &mut out, 8, PixelFormat::Bgra);
+        write_pixels(&img, Rect::from_size(2, 1), &mut out, 8, PixelFormat::Bgra);
         assert_eq!(out, [30, 20, 10, 255, 50, 100, 200, 128]);
-        write_pixels(&img, &mut out, 8, PixelFormat::Argb32Premultiplied);
+        write_pixels(
+            &img,
+            Rect::from_size(2, 1),
+            &mut out,
+            8,
+            PixelFormat::Argb32Premultiplied,
+        );
         let px = |i: usize| u32::from_ne_bytes(out[i * 4..][..4].try_into().unwrap());
         assert_eq!(px(0), 0xFF0A_141E);
         // 200 * 128 / 255 = 100.4 -> 100, 100 -> 50.2 -> 50, 50 -> 25.1 -> 25.
         assert_eq!(px(1), 0x8064_3219);
+    }
+
+    #[test]
+    fn row_conversion_matches_per_pixel_conversion() {
+        // Reference: the per-pixel definitions of each format.
+        let reference = |px: Rgba8, format: PixelFormat| -> [u8; 4] {
+            match format {
+                PixelFormat::Rgba => px.to_array(),
+                PixelFormat::Bgra => [px.b, px.g, px.r, px.a],
+                PixelFormat::Argb32Premultiplied => {
+                    let pm = |c: u8| u32::from((u16::from(c) * u16::from(px.a) + 127) / 255);
+                    (u32::from(px.a) << 24 | pm(px.r) << 16 | pm(px.g) << 8 | pm(px.b))
+                        .to_ne_bytes()
+                }
+            }
+        };
+        let opaque: Vec<Rgba8> = (0..=255u8)
+            .map(|c| Rgba8::new(c, c.wrapping_mul(7), c.wrapping_mul(13), 255))
+            .collect();
+        let mixed: Vec<Rgba8> = (0..=255u8)
+            .map(|a| Rgba8::new(200, a.wrapping_mul(3), 17, a))
+            .collect();
+        for row in [&opaque, &mixed] {
+            for format in [
+                PixelFormat::Rgba,
+                PixelFormat::Bgra,
+                PixelFormat::Argb32Premultiplied,
+            ] {
+                let mut out = vec![0u8; row.len() * 4];
+                convert_row(row, &mut out, format);
+                for (i, &px) in row.iter().enumerate() {
+                    assert_eq!(
+                        out[i * 4..][..4],
+                        reference(px, format),
+                        "{px:?} {format:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -467,6 +651,110 @@ mod tests {
                 );
             }
             p3b_renderer_free(r);
+            p3b_model_free(m);
+        }
+    }
+
+    #[test]
+    fn incremental_frames_equal_full_frames() {
+        let m = load("n64_logo_spin.dae");
+        let (w, h, stride) = (80u32, 50u32, 80 * 4 + 12);
+        let len = stride * h as usize;
+        let mut incremental = std::ptr::null_mut();
+        let mut full = std::ptr::null_mut();
+        let mut shown = vec![0x5Au8; len];
+        let mut expected = vec![0xA5u8; len];
+        let mut damage = p3b_rect::default();
+        let mut partial = 0;
+        // SAFETY: valid arguments; buffers hold `len` bytes.
+        unsafe {
+            assert_eq!(
+                p3b_renderer_new(m, 0, w, h, std::ptr::null(), &raw mut incremental),
+                p3b_status::Ok
+            );
+            assert_eq!(
+                p3b_renderer_new(m, 0, w, h, std::ptr::null(), &raw mut full),
+                p3b_status::Ok
+            );
+            for i in 0..30 {
+                let t = f64::from(i) * 0.11;
+                let format = P3B_PIXEL_FORMAT_ARGB32_PREMULTIPLIED;
+                assert_eq!(
+                    p3b_render_frame_incremental(
+                        incremental,
+                        t,
+                        shown.as_mut_ptr(),
+                        len,
+                        stride,
+                        format,
+                        &raw mut damage
+                    ),
+                    p3b_status::Ok
+                );
+                if i == 0 {
+                    assert_eq!(
+                        damage,
+                        p3b_rect {
+                            x: 0,
+                            y: 0,
+                            width: w,
+                            height: h
+                        }
+                    );
+                }
+                partial += usize::from(damage.width * damage.height < w * h);
+                assert_eq!(
+                    p3b_render_frame(full, t, expected.as_mut_ptr(), len, stride, format),
+                    p3b_status::Ok
+                );
+                for y in 0..h as usize {
+                    let row = y * stride..y * stride + w as usize * 4;
+                    assert_eq!(shown[row.clone()], expected[row], "frame {i}, row {y}");
+                    assert!(
+                        shown[y * stride + w as usize * 4..][..12]
+                            .iter()
+                            .all(|&b| b == 0x5A),
+                        "padding"
+                    );
+                }
+            }
+            assert!(partial > 20, "damage is usually partial ({partial})");
+            assert_eq!(
+                p3b_render_frame_incremental(
+                    incremental,
+                    0.0,
+                    shown.as_mut_ptr(),
+                    len,
+                    stride,
+                    0,
+                    std::ptr::null_mut()
+                ),
+                p3b_status::NullPointer
+            );
+            assert_eq!(
+                p3b_render_frame_incremental(
+                    incremental,
+                    f64::NAN,
+                    shown.as_mut_ptr(),
+                    len,
+                    stride,
+                    0,
+                    &raw mut damage
+                ),
+                p3b_status::InvalidArgument
+            );
+            assert_eq!(
+                damage,
+                p3b_rect {
+                    x: 0,
+                    y: 0,
+                    width: w,
+                    height: h
+                },
+                "errors report full damage"
+            );
+            p3b_renderer_free(incremental);
+            p3b_renderer_free(full);
             p3b_model_free(m);
         }
     }

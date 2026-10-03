@@ -5,8 +5,8 @@ use super::edge::EdgeFunction;
 use super::fixed::{FixedPoint, SUBPIXEL_SCALE};
 use crate::math::Vec2;
 
-/// A rectangle of pixels `[x0, x1) × [y0, y1)`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// A rectangle of pixels `[x0, x1) × [y0, y1)`. The default is empty.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Rect {
     /// First column.
     pub x0: u32,
@@ -44,6 +44,33 @@ impl Rect {
             y0: self.y0.max(other.y0),
             x1: self.x1.min(other.x1),
             y1: self.y1.min(other.y1),
+        }
+    }
+
+    /// The smallest rectangle containing both; empty rectangles contribute
+    /// nothing.
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Self {
+        match (self.is_empty(), other.is_empty()) {
+            (true, true) => Self::default(),
+            (true, false) => *other,
+            (false, true) => *self,
+            (false, false) => Self {
+                x0: self.x0.min(other.x0),
+                y0: self.y0.min(other.y0),
+                x1: self.x1.max(other.x1),
+                y1: self.y1.max(other.y1),
+            },
+        }
+    }
+
+    /// Width times height (0 if empty).
+    #[must_use]
+    pub fn area(&self) -> u64 {
+        if self.is_empty() {
+            0
+        } else {
+            u64::from(self.x1 - self.x0) * u64::from(self.y1 - self.y0)
         }
     }
 }
@@ -144,6 +171,30 @@ fn ceil_div(a: i64, b: i64) -> i64 {
 }
 
 impl TriangleSetup {
+    /// The pixels `for_each_pixel(scissor, …)` may visit: the triangle's
+    /// bounding box within `scissor` (empty if they do not overlap).
+    #[must_use]
+    pub fn bounds(&self, scissor: Rect) -> Rect {
+        // Intersect in i64; an empty or inverted scissor yields an empty
+        // range. The result lies within the scissor, hence within u32.
+        let x0 = self.min.0.max(i64::from(scissor.x0));
+        let y0 = self.min.1.max(i64::from(scissor.y0));
+        let x1 = (self.max.0 + 1).min(i64::from(scissor.x1));
+        let y1 = (self.max.1 + 1).min(i64::from(scissor.y1));
+        if x0 >= x1 || y0 >= y1 {
+            return Rect::default();
+        }
+        match (
+            u32::try_from(x0),
+            u32::try_from(y0),
+            u32::try_from(x1),
+            u32::try_from(y1),
+        ) {
+            (Ok(x0), Ok(y0), Ok(x1), Ok(y1)) => Rect { x0, y0, x1, y1 },
+            _ => Rect::default(),
+        }
+    }
+
     /// Prepares a triangle given in window coordinates.
     ///
     /// Either winding is accepted. Returns `None` for degenerate (zero-area
@@ -213,24 +264,10 @@ impl TriangleSetup {
     /// Calls `f` once for every pixel inside `scissor` whose centre the
     /// triangle covers under the top-left fill rule, row by row.
     pub fn for_each_pixel(&self, scissor: Rect, mut f: impl FnMut(Fragment)) {
-        // Intersect the candidate pixel range with the scissor in i64; an
-        // empty or inverted scissor yields an empty range.
-        let x0 = self.min.0.max(i64::from(scissor.x0));
-        let y0 = self.min.1.max(i64::from(scissor.y0));
-        let x1 = (self.max.0 + 1).min(i64::from(scissor.x1));
-        let y1 = (self.max.1 + 1).min(i64::from(scissor.y1));
+        let Rect { x0, y0, x1, y1 } = self.bounds(scissor);
         if x0 >= x1 || y0 >= y1 {
             return;
         }
-        // Within the scissor, hence non-negative and within u32.
-        let (Ok(x0), Ok(y0), Ok(x1), Ok(y1)) = (
-            u32::try_from(x0),
-            u32::try_from(y0),
-            u32::try_from(x1),
-            u32::try_from(y1),
-        ) else {
-            return;
-        };
         let start = FixedPoint::pixel_center(i64::from(x0), i64::from(y0));
         let mut row = self.edges.map(|e| e.eval(start));
         let step_x = self.edges.map(|e| e.step_x());
