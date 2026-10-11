@@ -30,7 +30,7 @@ use std::ffi::{CStr, c_char};
 /// to the C API; the shared library is `libplymouth_3dboot.so.<major>`.
 /// release-please updates the value (and the header's, which comes from
 /// cbindgen.toml) with the version.
-pub const P3B_ABI_VERSION: AbiVersion = 0; // x-release-please-major
+pub const P3B_ABI_VERSION: AbiVersion = 1; // x-release-please-major
 
 /// The type of [`P3B_ABI_VERSION`] (an alias without digits, so that
 /// release-please's major-version update finds the value).

@@ -19,7 +19,7 @@
 Name:           plymouth-3dboot
 # Kept in step with Cargo.toml and meson.build by release-please.
 # x-release-please-start-version
-Version:        0.1.0
+Version:        1.0.0
 # x-release-please-end
 Release:        0.%{snapshot}%{?dist}
 Summary:        CPU rasterizer for animated 3D models, with a C API
