@@ -1,15 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Fedora 44 environment: builds and tests the C library and the Plymouth
+# Fedora environment: builds and tests the C library and the Plymouth
 # plugin against Fedora's own toolchain and Plymouth, and produces RPMs
 # (`just rpm`). The Debian Containerfile remains the main development
 # environment (wasm, SDL, browser tests).
 # Use:    DEV_CONTAINER=fedora scripts/dev.sh <command>
+#         DEV_CONTAINER=fedora DEV_FEDORA=45 scripts/dev.sh <command>
+#
+# scripts/dev.sh chooses the base image per Fedora version (DEV_FEDORA: 44,
+# the default, pinned by digest; 45 and rawhide by tag, as they keep moving).
 
-FROM registry.fedoraproject.org/fedora:44@sha256:07584325a68e0308215aff1de506d8da6452d2e465c25729829a01393446f204
+ARG FEDORA_IMAGE=registry.fedoraproject.org/fedora:44@sha256:07584325a68e0308215aff1de506d8da6452d2e465c25729829a01393446f204
+FROM ${FEDORA_IMAGE}
 
-# Fedora packages only; Rust comes from Fedora (rust 1.98.1, matching
-# rust-toolchain.toml), as it would in a Fedora build system. The base image
+# Fedora packages only; Rust comes from Fedora (on Fedora 44 rust 1.98.1,
+# matching rust-toolchain.toml), as it would in a Fedora build system. The base image
 # is pinned, but Fedora keeps only the latest update of each package, so the
 # packages cannot be pinned: they follow Fedora 44 updates.
 # - cargo, rust, cargo-c, cargo-rpm-macros: the C library and RPM macros

@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Builds the RPMs with `just rpm` in the Fedora builder image, exactly as
-# `DEV_CONTAINER=fedora scripts/dev.sh just rpm` does locally (the build
-# runs the plugin's harness in %check). Runs on pull requests (the PR
-# check), on pushes to main, on demand, and from release.yml for releases;
-# the RPMs are uploaded as the `rpms` artifact.
+# Builds the RPMs with `just rpm` in a Fedora builder image, exactly as
+# `DEV_CONTAINER=fedora DEV_FEDORA=<version> scripts/dev.sh just rpm` does
+# locally (the build runs the plugin's harness in %check). Runs for Fedora
+# 44 on pull requests (the PR check) and pushes to main, for a chosen
+# version on demand, and for each version from release.yml; the RPMs are
+# uploaded as the `rpms-fedora-<version>` artifact.
 #
 # The builder image comes from ghcr.io (see builder-image.yml) under the
-# content hash of Containerfile.fedora. When a pull request changes the
-# Containerfile, no image exists for the new hash yet, and scripts/dev.sh
-# builds it in the job instead.
+# content hash of its inputs. When a pull request changes those, no image
+# exists for the new hash yet, and scripts/dev.sh builds it in the job
+# instead.
 name: RPM
 
 on:
@@ -17,20 +18,39 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      fedora:
+        description: Fedora version
+        type: choice
+        options: ['44', '45', rawhide]
+        default: '44'
   workflow_call:
+    inputs:
+      fedora:
+        description: Fedora version (44, 45 or rawhide)
+        type: string
+        default: '44'
+      allow-failure:
+        description: Do not fail the calling workflow if this build fails
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   packages: read
 
 concurrency:
-  group: rpm-${{ github.ref }}
+  group: rpm-${{ github.ref }}-${{ inputs.fedora || '44' }}
   cancel-in-progress: true
 
 jobs:
   rpm:
-    name: Build RPMs
+    name: Build RPMs (Fedora ${{ inputs.fedora || '44' }})
     runs-on: ubuntu-24.04
+    continue-on-error: ${{ inputs.allow-failure || false }}
+    env:
+      DEV_CONTAINER: fedora
+      DEV_FEDORA: ${{ inputs.fedora || '44' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -39,7 +59,7 @@ jobs:
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          local_image="$(DEV_CONTAINER=fedora scripts/dev.sh --image)"
+          local_image="$(scripts/dev.sh --image)"
           remote="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/plymouth-3dboot-builder-fedora:${local_image##*:}"
           # Logging in is only needed while the package is private.
           echo "${REGISTRY_TOKEN}" | podman login ghcr.io -u "${REGISTRY_USER}" --password-stdin || true
@@ -50,11 +70,11 @@ jobs:
           fi
 
       - name: Build the RPMs
-        run: DEV_CONTAINER=fedora scripts/dev.sh just rpm
+        run: scripts/dev.sh just rpm
 
       - name: Upload the RPMs
         uses: actions/upload-artifact@v7
         with:
-          name: rpms
+          name: rpms-fedora-${{ inputs.fedora || '44' }}
           path: dist/rpm/*.rpm
           if-no-files-found: error

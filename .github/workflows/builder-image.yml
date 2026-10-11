@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Builds the Fedora builder image (Containerfile.fedora) and pushes it to
-# ghcr.io/<owner>/plymouth-3dboot-builder-fedora, tagged with the content
-# hash that scripts/dev.sh uses locally (`DEV_CONTAINER=fedora
-# scripts/dev.sh --image`) and with `latest`. The RPM workflow pulls the
-# image for its commit's hash.
+# Builds the Fedora builder images (Containerfile.fedora, one per Fedora
+# version) with scripts/dev.sh, as locally, and pushes them to
+# ghcr.io/<owner>/plymouth-3dboot-builder-fedora. Each is tagged with the
+# content hash that scripts/dev.sh uses (`DEV_CONTAINER=fedora
+# DEV_FEDORA=<version> scripts/dev.sh --image`), which the RPM workflow
+# pulls, and with a readable alias (f44, f45, rawhide).
+#
+# Runs when the image's inputs change on main, on demand, and weekly: 45
+# and rawhide are not pinned and all three follow Fedora's package updates,
+# so the weekly run refreshes the images under the same tags.
 name: Builder image
 
 on:
@@ -13,39 +18,55 @@ on:
     paths:
       - Containerfile.fedora
       - rust-toolchain.toml
+      - scripts/dev.sh
       - .github/workflows/builder-image.yml
+  schedule:
+    - cron: '17 4 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
 
-concurrency:
-  group: builder-image
-  cancel-in-progress: false
-
 jobs:
   build:
-    name: Build and push
+    name: Build and push (Fedora ${{ matrix.fedora }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora: ['44', '45', rawhide]
+    concurrency:
+      group: builder-image-${{ matrix.fedora }}
+      cancel-in-progress: false
+    env:
+      DEV_CONTAINER: fedora
+      DEV_FEDORA: ${{ matrix.fedora }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Build the image
         id: build
         run: |
-          local_image="$(DEV_CONTAINER=fedora scripts/dev.sh --image)"
+          # Running any command builds the image if it is missing.
+          scripts/dev.sh true
+          local_image="$(scripts/dev.sh --image)"
           remote="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/plymouth-3dboot-builder-fedora"
           tag="${local_image##*:}"
-          # Like scripts/dev.sh, build from an empty context.
+          alias="${DEV_FEDORA}"
+          [[ "${alias}" == rawhide ]] || alias="f${alias}"
+          # Label the image so that the package belongs to this repository.
           context="$(mktemp -d)"
-          podman build --pull \
+          printf 'FROM %s\n' "${local_image}" > "${context}/Containerfile"
+          podman build \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            -t "${remote}:${tag}" -t "${remote}:latest" \
-            -f Containerfile.fedora "${context}"
-          echo "remote=${remote}" >> "${GITHUB_OUTPUT}"
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+            -t "${remote}:${tag}" -t "${remote}:${alias}" "${context}"
+          {
+            echo "remote=${remote}"
+            echo "tag=${tag}"
+            echo "alias=${alias}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Push to ghcr.io
         env:
@@ -53,7 +74,8 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REMOTE: ${{ steps.build.outputs.remote }}
           TAG: ${{ steps.build.outputs.tag }}
+          ALIAS: ${{ steps.build.outputs.alias }}
         run: |
           echo "${REGISTRY_TOKEN}" | podman login ghcr.io -u "${REGISTRY_USER}" --password-stdin
           podman push "${REMOTE}:${TAG}"
-          podman push "${REMOTE}:latest"
+          podman push "${REMOTE}:${ALIAS}"

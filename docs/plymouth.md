@@ -6,8 +6,9 @@ loads from `/usr/lib/<multiarch>/plymouth/`, plus a theme directory under
 `/usr/share/plymouth/themes/`. The plugin renders through `libplymouth_3dboot`
 ([C API](c-api.md)).
 
-Supported Plymouth: **24.x** (developed against 24.004.60, Debian trixie;
-`ply-splash-core` and `ply-splash-graphics`, soname 5).
+Supported Plymouth: **24.x and 26.x**. Developed against 24.004.60 (Debian
+trixie, Fedora 44); also built and tested against 26.134.222 (Fedora 45 and
+rawhide). It uses `ply-splash-core` and `ply-splash-graphics`.
 
 ## Plugin interface (`ply-boot-splash-plugin.h`)
 

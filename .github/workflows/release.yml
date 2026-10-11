@@ -3,8 +3,10 @@
 # release-please (release-please-config.json, .release-please-manifest.json)
 # keeps a release pull request open from the conventional commits on main:
 # it updates CHANGELOG.md and the version in Cargo.toml, Cargo.lock,
-# plymouth/meson.build and the RPM spec. Merging it tags vX.Y.Z and creates
-# a GitHub release, to which the RPMs built at that commit are attached.
+# plymouth/meson.build, the RPM spec and the ABI version. Merging it tags
+# vX.Y.Z and creates a GitHub release, to which the RPMs built at that
+# commit for Fedora 44, 45 and rawhide are attached. A failing rawhide
+# build does not fail the release: its RPMs are then simply missing.
 name: Release
 
 on:
@@ -37,19 +39,35 @@ jobs:
     name: RPMs
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fedora: '44'
+            allow-failure: false
+          - fedora: '45'
+            allow-failure: false
+          - fedora: rawhide
+            allow-failure: true
     permissions:
       contents: read
       packages: read
     uses: ./.github/workflows/rpm.yml
+    with:
+      fedora: ${{ matrix.fedora }}
+      allow-failure: ${{ matrix.allow-failure }}
 
   attach:
     name: Attach RPMs to the release
     needs: [release-please, rpm]
+    # Attach whatever was built, even if one Fedora version failed.
+    if: always() && needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: rpms
+          pattern: rpms-fedora-*
+          merge-multiple: true
           path: rpms
       - name: Upload to the release
         env:

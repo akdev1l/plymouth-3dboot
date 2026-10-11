@@ -11,60 +11,72 @@ and prunes superseded images and Emscripten cache volumes.
 
 ## Fedora container
 
-[`Containerfile.fedora`](../Containerfile.fedora) (`fedora:44`, pinned by
-digest) builds and tests the C library and the Plymouth plugin against
-Fedora's toolchain and Plymouth, and builds the RPMs. Select it with
-`DEV_CONTAINER=fedora`:
+[`Containerfile.fedora`](../Containerfile.fedora) builds and tests the C
+library and the Plymouth plugin against Fedora's toolchain and Plymouth, and
+builds the RPMs. Select it with `DEV_CONTAINER=fedora`, and the Fedora
+version with `DEV_FEDORA` (`44` by default, `45` or `rawhide`):
 
 ```sh
 DEV_CONTAINER=fedora scripts/dev.sh just test-c test-plymouth
-DEV_CONTAINER=fedora scripts/dev.sh just rpm     # RPMs in dist/rpm/
+DEV_CONTAINER=fedora scripts/dev.sh just rpm                     # RPMs in dist/rpm/
+DEV_CONTAINER=fedora DEV_FEDORA=rawhide scripts/dev.sh just rpm  # .fc46 RPMs
 ```
 
-It uses Fedora's packages only: rust/cargo 1.98.1 (no rustup, so
-`rust-toolchain.toml` does not apply), cargo-c 0.10.24, Plymouth 24.004.60
-with its label plugin, meson, rpm-build, cargo-rpm-macros and
+| `DEV_FEDORA` | Base image | rust | Plymouth |
+|---|---|---|---|
+| `44` | `fedora:44`, pinned by digest | 1.98.1 | 24.004.60 |
+| `45` | `fedora:45` (tag) | 1.99.0 | 26.134.222 |
+| `rawhide` | `fedora:rawhide` (tag; Fedora 46) | 1.99.0 | 26.134.222 |
+
+(Versions as of 2026-10-11.) The container uses Fedora's packages only:
+rust and cargo (no rustup, so `rust-toolchain.toml` does not apply), cargo-c,
+Plymouth with its label plugin, meson, rpm-build, cargo-rpm-macros and
 cargo-vendor-filterer. Fedora keeps only the latest update of each package,
-so packages follow Fedora 44 updates rather than exact versions. The
-container mounts its own volume on `target/`, so its build outputs never mix
-with the Debian container's. It has no Emscripten or SDL: `just check` stays
-in the Debian container.
+so packages follow each version's updates rather than exact versions. Each
+Fedora version has its own image and its own volumes for `target/` and the
+cargo cache, so build outputs never mix, with each other or with the Debian
+container's. There is no Emscripten or SDL: `just check` stays in the Debian
+container.
 
 ## Continuous integration (GitHub Actions)
 
-- [`builder-image.yml`](../.github/workflows/builder-image.yml) builds
-  `Containerfile.fedora` and pushes it to
+- [`builder-image.yml`](../.github/workflows/builder-image.yml) builds the
+  image for each Fedora version with `scripts/dev.sh` and pushes it to
   `ghcr.io/<owner>/plymouth-3dboot-builder-fedora`, tagged with the content
-  hash from `DEV_CONTAINER=fedora scripts/dev.sh --image` and with `latest`.
-  It runs when `Containerfile.fedora`, `rust-toolchain.toml` or the workflow
-  change on `main`, and on demand (*Run workflow*).
+  hash from `DEV_CONTAINER=fedora DEV_FEDORA=<version> scripts/dev.sh --image`
+  and with an alias (`f44`, `f45`, `rawhide`). It runs when
+  `Containerfile.fedora`, `rust-toolchain.toml`, `scripts/dev.sh` or the
+  workflow change on `main`, on demand (*Run workflow*), and weekly, which
+  refreshes the images with Fedora's updates under the same tags.
 - [`rpm.yml`](../.github/workflows/rpm.yml) runs `just rpm` through
-  `scripts/dev.sh`, as locally, on pull requests (the PR check, *Build
-  RPMs*), on pushes to `main` and on demand, and uploads the RPMs as the
-  `rpms` artifact. It pulls the builder image for the commit's hash; if
-  there is none (a pull request that changes `Containerfile.fedora`),
+  `scripts/dev.sh`, as locally: for Fedora 44 on pull requests (the PR
+  check, *Build RPMs (Fedora 44)*) and on pushes to `main`, and for a chosen
+  version on demand. It uploads the RPMs as the `rpms-fedora-<version>`
+  artifact. It pulls the builder image for the commit's hash; if there is
+  none (a pull request that changes `Containerfile.fedora`),
   `scripts/dev.sh` builds the image in the job.
-
 - [`release.yml`](../.github/workflows/release.yml) runs release-please on
   every push to `main` ([`release-please-config.json`](../release-please-config.json),
   [`.release-please-manifest.json`](../.release-please-manifest.json)). It
   keeps a release pull request open that updates `CHANGELOG.md` from the
   conventional commits and bumps the version in `Cargo.toml`, `Cargo.lock`
-  (the workspace crates, which have no `source`), `plymouth/meson.build`
-  and the RPM spec (marked with `x-release-please-version` comments).
-  Merging it tags `vX.Y.Z`, creates the GitHub release and attaches the RPMs
-  built at that commit. Before 1.0, `feat` commits bump the minor version
-  and breaking changes too (`bump-minor-pre-major`); the first release is
-  0.1.0.
+  (the workspace crates, which have no `source`), `plymouth/meson.build`,
+  the RPM spec and `P3B_ABI_VERSION` (marked with `x-release-please-…`
+  comments). Merging it tags `vX.Y.Z`, creates the GitHub release and
+  attaches the RPMs built at that commit for Fedora 44, 45 and rawhide
+  (`.fc44`, `.fc45`, `.fc46`). A failing rawhide build does not fail the
+  release; its RPMs are then missing from it. The first release is 1.0.0
+  (release-please's initial version); before a 1.0 the option
+  `bump-minor-pre-major` would apply.
 
 The image package is created on the first run of `builder-image.yml`.
 Pull requests from forks can only pull it if the package is public
 (package settings on GitHub); otherwise their jobs build the image
 themselves, which works but takes longer. To make the check required, add
-*Build RPMs* to the branch protection rules of `main`.
+*Build RPMs (Fedora 44)* to the branch protection rules of `main`.
 
 Pull requests opened with the default `GITHUB_TOKEN`, like release-please's,
-do not trigger other workflows, so the *Build RPMs* check does not run on
+do not trigger other workflows, so the *Build RPMs (Fedora 44)* check does not run on
 the release pull request. If that check is required, give release-please a
 personal access token or GitHub App token (the action's `token` input), or
 merge the release pull request as an administrator.

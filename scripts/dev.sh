@@ -19,6 +19,9 @@
 #                  Plymouth plugin and RPMs on Fedora. The Fedora container
 #                  mounts its own volume on target/, so the two never share
 #                  build outputs.
+#   DEV_FEDORA     with DEV_CONTAINER=fedora: the Fedora version, `44`
+#                  (default), `45` or `rawhide`, each with its own image and
+#                  volumes.
 #   DEV_ENV_PASS   space-separated extra variables to forward (UPDATE_GOLDEN,
 #                  RUST_BACKTRACE, RUST_LOG and SDL_VIDEODRIVER are always
 #                  forwarded when set)
@@ -31,7 +34,17 @@ case "${DEV_CONTAINER:-debian}" in
         containerfile="${repo_root}/Containerfile"
         ;;
     fedora)
-        image_name="plymouth-3dboot-dev-fedora"
+        # One image, and one set of cache volumes, per Fedora version.
+        fedora="${DEV_FEDORA:-44}"
+        case "${fedora}" in
+            44) base_image="registry.fedoraproject.org/fedora:44@sha256:07584325a68e0308215aff1de506d8da6452d2e465c25729829a01393446f204" ;;
+            45 | rawhide) base_image="registry.fedoraproject.org/fedora:${fedora}" ;;
+            *)
+                echo "dev.sh: unknown DEV_FEDORA '${fedora}' (44, 45 or rawhide)" >&2
+                exit 2
+                ;;
+        esac
+        image_name="plymouth-3dboot-dev-fedora-${fedora}"
         containerfile="${repo_root}/Containerfile.fedora"
         ;;
     *)
@@ -40,7 +53,8 @@ case "${DEV_CONTAINER:-debian}" in
         ;;
 esac
 
-hash="$(cat "${containerfile}" "${repo_root}/rust-toolchain.toml" | sha256sum | cut -c1-12)"
+# The Fedora base image is part of the hash (nothing is added for Debian).
+hash="$({ cat "${containerfile}" "${repo_root}/rust-toolchain.toml"; printf '%s' "${base_image:-}"; } | sha256sum | cut -c1-12)"
 image="${image_name}:${hash}"
 emcache_volume="${image_name}-emcache-${hash}"
 
@@ -55,7 +69,8 @@ if ! podman image exists "${image}"; then
     # empty context instead of uploading the working tree (and target/).
     context="$(mktemp -d)"
     trap 'rmdir "${context}"' EXIT
-    podman build -t "${image}" -t "${image_name}:latest" -f "${containerfile}" "${context}" >&2
+    podman build ${base_image:+--build-arg "FEDORA_IMAGE=${base_image}"} \
+        -t "${image}" -t "${image_name}:latest" -f "${containerfile}" "${context}" >&2
 
     # Prune superseded images and emscripten cache volumes (best effort:
     # anything still in use is kept).
