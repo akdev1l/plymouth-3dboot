@@ -43,15 +43,26 @@ enum { W = 64, H = 48 };
 
 /* --- Interposed time ------------------------------------------------------ */
 
+/* The virtual clock covers a span that is already in the real (monotonic)
+ * clock's past, so that switching to real time later never goes backwards
+ * and timers set on the virtual clock are due at once. (The monotonic clock
+ * counts from boot: on a freshly booted machine a fixed start such as
+ * 1000 s would lie in its future, leaving those timers far away.) */
 static bool time_frozen = true;
-static double frozen_time = 1000.0;
+static double start_time;  /* real time when the test started */
+static double frozen_time; /* virtual time while frozen */
 
-double ply_get_timestamp(void) {
-    if (time_frozen)
-        return frozen_time;
+/* Seconds of virtual time the frozen part of the test may use. */
+#define VIRTUAL_SPAN 10.0
+
+static double real_time(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double) ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+double ply_get_timestamp(void) {
+    return time_frozen ? frozen_time : real_time();
 }
 
 /* --- Fake pixel display ------------------------------------------------------ */
@@ -157,6 +168,9 @@ static void run_for(ply_event_loop_t *loop, double seconds) {
 
 int main(int argc, char **argv) {
     CHECK(argc == 3);
+    /* Whole seconds, so that start + 0.75 - start is exactly 0.75, and
+     * VIRTUAL_SPAN seconds back, before the virtual times used below. */
+    start_time = frozen_time = (double) (long long) real_time() - VIRTUAL_SPAN;
     const char *model_path = argv[2];
 
     char theme[] = "/tmp/p3b-theme-XXXXXX";
@@ -214,7 +228,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 20; i++) {
         frozen_time += 0.137;
         tick(loop);
-        check_frame(&display, model_path, frozen_time - 1000.0); /* as the plugin computes it */
+        check_frame(&display, model_path, frozen_time - start_time); /* as the plugin computes it */
     }
     /* Frame statistics every 5 s go to Plymouth's debug log (ply_trace
      * writes to the error logger, which plymouthd --debug sends there). */
@@ -225,7 +239,7 @@ int main(int argc, char **argv) {
     ply_logger_t *logger = ply_logger_get_error_default();
     CHECK(ply_logger_open_file(logger, log_path));
     ply_logger_toggle_tracing(logger);
-    frozen_time = 1000.0 + 6.0;
+    frozen_time = start_time + 6.0;
     tick(loop);
     check_frame(&display, model_path, 6.0);
     ply_logger_flush(logger);
@@ -254,6 +268,7 @@ int main(int argc, char **argv) {
     check_frame(&display, model_path, 6.0);
 
     /* In real time the frame timer keeps redrawing (30 fps)... */
+    CHECK(frozen_time <= real_time()); /* see VIRTUAL_SPAN */
     time_frozen = false;
     int before = display.draws;
     run_for(loop, 0.3);
