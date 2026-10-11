@@ -15,12 +15,57 @@ A CPU rasterizer for animated 3D models, written in Rust, for use in a
   natively or in the browser through Emscripten.
 - **Viewer** (`apps/viewer`): an interactive model viewer for both targets.
 - **Test support** (`crates/plymouth-3dboot-testutil`): golden-image comparison, for development only.
-- **C API and Plymouth plugin**: planned (Phases 11–12 of the plan).
+- **C API** (`crates/plymouth-3dboot-capi`): the library as
+  `libplymouth_3dboot` with a C header ([docs/c-api.md](docs/c-api.md)).
+- **Plymouth plugin and theme** (`plymouth/`): a splash plugin that renders
+  a model at boot, and a demo theme with the spinning N64 logo
+  ([docs/plymouth.md](docs/plymouth.md)).
 
 Targets: `x86_64-unknown-linux-gnu` and `wasm32-unknown-emscripten`.
 
-Status: early development. See [`PLAN.md`](PLAN.md) for the phased
-execution plan.
+See [`PLAN.md`](PLAN.md) for the phased execution plan.
+
+## Installing on Fedora
+
+Each [release](https://github.com/akdev1l/plymouth-3dboot/releases) has RPMs
+for Fedora 44, 45 and rawhide (x86_64). Three packages are needed: the
+library (`plymouth-3dboot`), the plugin (`plymouth-plugin-3dboot`) and the
+theme (`plymouth-theme-3dboot-n64`). The `-devel`, `-debuginfo`,
+`-debugsource` and `.src.rpm` files are not.
+
+Download the three for your Fedora version, either from the release page or
+with the [GitHub CLI](https://cli.github.com/):
+
+```sh
+fc="fc$(rpm -E %fedora)"    # fc44, fc45, or fc46 on rawhide
+gh release download --repo akdev1l/plymouth-3dboot --dir plymouth-3dboot-rpms \
+    --pattern "plymouth-3dboot-[0-9]*.${fc}.x86_64.rpm" \
+    --pattern "plymouth-plugin-3dboot-[0-9]*.${fc}.x86_64.rpm" \
+    --pattern "plymouth-theme-3dboot-n64-[0-9]*.${fc}.noarch.rpm"
+```
+
+Then install them and select the theme. On Fedora Workstation and other
+mutable variants:
+
+```sh
+sudo dnf install ./plymouth-3dboot-rpms/*.rpm
+sudo plymouth-set-default-theme -R 3dboot-n64    # -R rebuilds the initramfs
+```
+
+On Fedora Atomic (Silverblue, Kinoite, uBlue images), layer the packages and
+have the initramfs regenerated locally, then reboot:
+
+```sh
+sudo rpm-ostree install ./plymouth-3dboot-rpms/*.rpm
+printf '[Daemon]\nTheme=3dboot-n64\n' | sudo tee /etc/plymouth/plymouthd.conf
+sudo rpm-ostree initramfs --enable
+systemctl reboot
+```
+
+To go back, select the previous theme again (`bgrt` is Fedora's default) in
+the same way; on Atomic, `sudo rpm-ostree rollback` undoes the whole change.
+[docs/plymouth.md](docs/plymouth.md#installing) has the details: updating,
+removing, trying the theme without rebooting, and the theme's options.
 
 ## Development environment
 
