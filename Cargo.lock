@@ -398,7 +398,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plymouth-3dboot"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytemuck",
  "criterion",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "plymouth-3dboot-capi"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytemuck",
  "plymouth-3dboot",
@@ -423,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "plymouth-3dboot-sdl"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "plymouth-3dboot",
  "sdl3",
@@ -433,14 +433,14 @@ dependencies = [
 
 [[package]]
 name = "plymouth-3dboot-testutil"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "plymouth-3dboot",
 ]
 
 [[package]]
 name = "plymouth-3dboot-viewer"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libm",
  "plymouth-3dboot",

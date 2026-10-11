@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 project('plymouth-3dboot-plugin', 'c',
-  version: '0.1.0', # x-release-please-version
+  version: '1.0.0', # x-release-please-version
   license: 'GPL-3.0-or-later',
   meson_version: '>= 1.0',
   # Plymouth's headers (ply_trace) need GNU C; -Wall -Wextra -Werror still apply.
